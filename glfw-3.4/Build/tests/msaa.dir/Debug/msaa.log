@@ -1,0 +1,5 @@
+﻿  Building Custom Rule C:/Users/Allan/Desktop/glfw-3.4/tests/CMakeLists.txt
+  msaa.c
+  getopt.c
+  Generating Code...
+  msaa.vcxproj -> C:\Users\Allan\Desktop\glfw-3.4\Build\tests\Debug\msaa.exe
