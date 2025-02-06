@@ -86,11 +86,49 @@ void Main::createShaders() {
 void Main::createBufferObjects() {
 
     float vertices[] = {
-    //positions          //colours        //texture coords
-     0.5f,  0.5f, 0.0f,  1.0f,0.0f,0.0f,  1.0f,1.0f,// top right
-     0.5f, -0.5f, 0.0f,  0.0f,1.0f,0.0f,  1.0f,0.0f,// bottom right
-    -0.5f, -0.5f, 0.0f,  0.0f,0.0f,1.0f,  0.0f,0.0f,// bottom left
-    -0.5f,  0.5f, 0.0f,  1.0f,1.0f,0.0f,  0.0f,1.0f// top left 
+        // positions          // colors           // texture coords
+        // Back face
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
+        // Front face
+        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+        // Left face
+        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+        // Right face
+         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,
+         // Bottom face
+         -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+          0.5f, -0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+          0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+          0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+         -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f,
+         -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+         // Top face
+         -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+          0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+          0.5f,  0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 1.0f,
+          0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+         -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+         -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f
     };
     unsigned int indices[] = {  // note that we start from 0!
         0, 1, 3,   // first triangle
@@ -125,16 +163,69 @@ void Main::createBufferObjects() {
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); 
     glEnableVertexAttribArray(2); 
 
+
+    //unblund vao
+    glBindVertexArray(0);
+
 }
 
 void Main::render() {
 
     // set background & clear screen
     glClearColor(0.1, 0.4, 0.6, 1);
-    glClear(GL_COLOR_BUFFER_BIT); 
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+    glEnable(GL_DEPTH_TEST); 
 
     shader->use();
 
+
+    /*
+    //create identity matrix
+    glm::mat4 trans = glm::mat4(1.0f);
+
+    
+    //translate container
+    trans = glm::translate(trans, glm::vec3(0.5f, -0.5f, 0.0f));//move right and down(x,y,z)
+
+    //rotate container over time
+    trans = glm::rotate(trans, (float)glfwGetTime(), glm::vec3(0, 0, 1));
+
+    //scale container
+    trans = glm::scale(trans, glm::vec3(1, 1, 1));
+
+    //get refernce for shaders transform
+    unsigned int transLoc = glGetUniformLocation(shader->ID, "transform");
+
+    //pass transformation matix to shader
+    glUniformMatrix4fv(transLoc, 1, GL_FALSE, glm::value_ptr(trans));
+    */
+    
+    //define transform matricies
+    glm::mat4 model = glm::mat4(1.0f);
+    // Rotate the object
+    model = glm::rotate(model, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f)); 
+
+    glm::mat4 view = glm::mat4(1.0f);
+    // Translate the scene in the opposite direction to simulate moving the camera backwards.
+    view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
+
+    glm::mat4 projection;
+    projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+
+    // Pass the transformation matrices to the shader
+    unsigned int modelLoc = glGetUniformLocation(shader->ID, "model");
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+    unsigned int viewLoc = glGetUniformLocation(shader->ID, "view"); 
+    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+
+    unsigned int projLoc = glGetUniformLocation(shader->ID, "projection");
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+    
+
+
+    //for texturing
     glActiveTexture(GL_TEXTURE0); 
     glBindTexture(GL_TEXTURE_2D, texture); 
     
@@ -143,18 +234,19 @@ void Main::render() {
     float timeValue = glfwGetTime();
     float greenValue = sin(timeValue) / 2.0f + 0.5f;
     
+    //pass the information to the shader
     shader->setVec4("ourColour",glm::vec4(0, greenValue,0,1.0f));
     shader->setInt("ourTexture", 0);
 
     
     // The first argument is the drawing mode (like glDrawArrays). The second is the number of elements to draw (6 vertices). 
     // The third is the index type (GL_UNSIGNED_INT). The last is the offset (set to 0 here).
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO); 
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
+    //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO); 
+    //glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
 
     //v to draw a triangle from array
-    //glBindVertexArray(VAO);
-    //glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(VAO);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
 }
 
 void Main::run() {
