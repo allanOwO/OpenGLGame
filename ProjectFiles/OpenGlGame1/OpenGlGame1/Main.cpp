@@ -24,7 +24,10 @@ std::string Main::loadShader(const char* filepath) {
     return buffer.str();
 }
 
-void framebuffer_size_callback(GLFWwindow* window, int width, int height);//define function(doesnt work inn main because it needs to be a free function
+void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+}
 
 void Main::init() {
 
@@ -73,10 +76,7 @@ void Main::processInput(GLFWwindow* window)
         glfwSetWindowShouldClose(window, true);
 }
 
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
-{
-    glViewport(0, 0, width, height);
-}
+
 
 void Main::createShaders() {
 
