@@ -74,6 +74,19 @@ void Main::processInput(GLFWwindow* window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)//check for esc pressed
         glfwSetWindowShouldClose(window, true);
+
+    const float camSpeed = 0.05f;
+    //fw & bw move
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += camSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= camSpeed * cameraFront;
+
+    //L  & R move
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
 }
 
 
@@ -208,6 +221,21 @@ void Main::render() {
     glm::mat4 view = glm::mat4(1.0f);
     // Translate the scene in the opposite direction to simulate moving the camera backwards.
     view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
+
+    /*
+    //rotating the camera around a circle
+    const float radius = 5.0f;
+    cameraPos.x = sin(glfwGetTime()) * radius *-2;
+    cameraPos.z = cos(glfwGetTime()) * radius;
+    view = glm::lookAt(cameraPos, glm::vec3(0,0,0), cameraUp);
+    //lookat(position, target, up)
+    
+    */
+
+    view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    //lookat(position, target, up)
+
+    
 
     glm::mat4 projection;
     projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
