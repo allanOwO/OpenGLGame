@@ -1,0 +1,123 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\Main.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.H||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\Main.H||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\Shader.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\Shader.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\vertex_shader.glsl||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\vertex_shader.glsl||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\fragment_shader.glsl||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{D0975AAB-F99B-402B-AA38-F515F4BEB185}|OpenGlGame1\\OpenGlGame1.vcxproj|solutionrelative:OpenGlGame1\\fragment_shader.glsl||{8B382828-6202-11D1-8870-0000F87579D2}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Main.h",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.h",
+              "RelativeDocumentMoniker": "OpenGlGame1\\Main.h",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.h",
+              "RelativeToolTip": "OpenGlGame1\\Main.h",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAAACkAAAATAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
+              "WhenOpened": "2025-03-17T09:49:06.834Z",
+              "IsPinned": true,
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Main.cpp",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.cpp",
+              "RelativeDocumentMoniker": "OpenGlGame1\\Main.cpp",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Main.cpp",
+              "RelativeToolTip": "OpenGlGame1\\Main.cpp",
+              "ViewState": "AgIAACoAAAAAAAAAAAAAAEcAAABBAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2025-03-17T09:49:06.862Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "Shader.cpp",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.cpp",
+              "RelativeDocumentMoniker": "OpenGlGame1\\Shader.cpp",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.cpp",
+              "RelativeToolTip": "OpenGlGame1\\Shader.cpp",
+              "ViewState": "AgIAAE4AAAAAAAAAAAAAACAAAABOAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2025-03-17T09:49:06.863Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Shader.h",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.h",
+              "RelativeDocumentMoniker": "OpenGlGame1\\Shader.h",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\Shader.h",
+              "RelativeToolTip": "OpenGlGame1\\Shader.h",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAAWAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
+              "WhenOpened": "2025-03-17T09:49:06.864Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "vertex_shader.glsl",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\vertex_shader.glsl",
+              "RelativeDocumentMoniker": "OpenGlGame1\\vertex_shader.glsl",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\vertex_shader.glsl",
+              "RelativeToolTip": "OpenGlGame1\\vertex_shader.glsl",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAARAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2025-03-17T09:49:07.361Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "fragment_shader.glsl",
+              "DocumentMoniker": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\fragment_shader.glsl",
+              "RelativeDocumentMoniker": "OpenGlGame1\\fragment_shader.glsl",
+              "ToolTip": "C:\\Users\\ablyth300\\Documents\\GitHub\\OpenGLGame\\ProjectFiles\\OpenGlGame1\\OpenGlGame1\\fragment_shader.glsl",
+              "RelativeToolTip": "OpenGlGame1\\fragment_shader.glsl",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAACAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2025-03-17T09:49:07.409Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

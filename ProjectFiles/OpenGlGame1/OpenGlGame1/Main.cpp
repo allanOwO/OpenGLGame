@@ -68,6 +68,8 @@ void Main::init() {
 
     // Set framebuffer size callback (this was missing)
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);//lock mouse to scrreen 
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -75,18 +77,37 @@ void Main::processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)//check for esc pressed
         glfwSetWindowShouldClose(window, true);
 
-    const float camSpeed = 0.05f;
+
+    //cam movement
+    float currentFrame = glfwGetTime();
+    deltaTime = currentFrame - lastFrame;
+    lastFrame = currentFrame;
+
+    float camSpeed = camSpeedBase * deltaTime;
+    
     //fw & bw move
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         cameraPos += camSpeed * cameraFront;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
         cameraPos -= camSpeed * cameraFront;
-
     //L  & R move
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
+
+    //cam mouse movement
+    lookDirection.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    lookDirection.y = sin(glm::radians(pitch));
+    lookDirection.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+
+  //  glfwSetCursorPosCallback(window, mouse_callback);// mouse input section https://learnopengl.com/Getting-started/Camera
+
+
+}
+
+void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+
 }
 
 

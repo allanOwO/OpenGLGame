@@ -1,6 +1,7 @@
 ﻿  Main.cpp
-C:\Users\Allan\Documents\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(175,28): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
-C:\Users\Allan\Documents\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(175,23): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
-C:\Users\Allan\Documents\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(175,18): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
-C:\Users\Allan\Documents\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(234,21): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-  OpenGlGame1.vcxproj -> C:\Users\Allan\Documents\OpenGLGame\ProjectFiles\OpenGlGame1\x64\Debug\OpenGlGame1.exe
+C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(82,24): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(202,28): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
+C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(202,23): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
+C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(202,18): warning C4305: 'argument': truncation from 'double' to 'GLfloat'
+C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\OpenGlGame1\Main.cpp(276,21): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+  OpenGlGame1.vcxproj -> C:\Users\ablyth300\Documents\GitHub\OpenGLGame\ProjectFiles\OpenGlGame1\x64\Debug\OpenGlGame1.exe
