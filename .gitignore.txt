@@ -1,0 +1,9 @@
+# Ignore Visual Studio indexing files
+.vsidx
+# Ignore Visual Studio folder
+.vs/
+# Ignore Visual Studio build log files
+*.tlog
+# Ignore Program Database files (debugging symbols)
+*.pdb
+*.lastbuildstate
