@@ -31,6 +31,7 @@ private:
 
 	GLFWwindow* window; // Window pointer
 
+	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int EBO, VBO, VAO, texture;//element buffer, vertex buffer, vertext array
 
 	Shader* shader;

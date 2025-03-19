@@ -5,6 +5,8 @@
 #define STB_IMAGE_IMPLEMENTATION  // This tells stb to include the implementation
 #include "stb/stb_image.h"          // Path to the stb_image.h file
 
+#include "Chunk.h"
+
 
 Main::Main() : window(nullptr){
 
@@ -64,12 +66,15 @@ void Main::init() {
 
     glViewport(0, 0, 800, 600);
 
-    glfwSetWindowUserPointer(window, this);//set the pointer
+    //set the pointer
+    glfwSetWindowUserPointer(window, this);
 
     // Set framebuffer size callback (this was missing)
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);//lock mouse to scrreen 
+    //lock mouse to scrreen
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); 
+
     //using a lambda
     glfwSetCursorPosCallback(window, [](GLFWwindow* window, double xpos, double ypos) {
         // Retrieve the instance pointer from the user pointer.
@@ -103,14 +108,9 @@ void Main::processInput(GLFWwindow* window)
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
-
-    
-
-    
-
-
 }
 
+//handles looking
 void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
     if (firstMouse)//stops large 1st jump
@@ -249,28 +249,6 @@ void Main::render() {
 
     shader->use();
 
-
-    /*
-    //create identity matrix
-    glm::mat4 trans = glm::mat4(1.0f);
-
-    
-    //translate container
-    trans = glm::translate(trans, glm::vec3(0.5f, -0.5f, 0.0f));//move right and down(x,y,z)
-
-    //rotate container over time
-    trans = glm::rotate(trans, (float)glfwGetTime(), glm::vec3(0, 0, 1));
-
-    //scale container
-    trans = glm::scale(trans, glm::vec3(1, 1, 1));
-
-    //get refernce for shaders transform
-    unsigned int transLoc = glGetUniformLocation(shader->ID, "transform");
-
-    //pass transformation matix to shader
-    glUniformMatrix4fv(transLoc, 1, GL_FALSE, glm::value_ptr(trans));
-    */
-    
     //define transform matricies
     glm::mat4 model = glm::mat4(1.0f);
     // Rotate the object
@@ -280,20 +258,9 @@ void Main::render() {
     // Translate the scene in the opposite direction to simulate moving the camera backwards.
     view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
 
-    /*
-    //rotating the camera around a circle
-    const float radius = 5.0f;
-    cameraPos.x = sin(glfwGetTime()) * radius *-2;
-    cameraPos.z = cos(glfwGetTime()) * radius;
-    view = glm::lookAt(cameraPos, glm::vec3(0,0,0), cameraUp);
-    //lookat(position, target, up)
-    
-    */
-
     view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     //lookat(position, target, up)
-
-    
+  
 
     glm::mat4 projection;
     projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
@@ -308,9 +275,6 @@ void Main::render() {
     unsigned int projLoc = glGetUniformLocation(shader->ID, "projection");
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
-    
-
-
     //for texturing
     glActiveTexture(GL_TEXTURE0); 
     glBindTexture(GL_TEXTURE_2D, texture); 
@@ -324,12 +288,6 @@ void Main::render() {
     shader->setVec4("ourColour",glm::vec4(0, greenValue,0,1.0f));
     shader->setInt("ourTexture", 0);
 
-    
-    // The first argument is the drawing mode (like glDrawArrays). The second is the number of elements to draw (6 vertices). 
-    // The third is the index type (GL_UNSIGNED_INT). The last is the offset (set to 0 here).
-    //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO); 
-    //glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
-
     //v to draw a triangle from array
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
@@ -340,6 +298,8 @@ void Main::run() {
     createBufferObjects();
 
     createShaders();
+    Chunk chunk(0, 0, 0);
+    chunk.generateMesh();
 
     //texture code ---------------
     int width, height, nrChannels;
@@ -368,6 +328,7 @@ void Main::run() {
         processInput(window);
 
         render();
+        chunk.render(); 
 
         glfwSwapBuffers(window);
         glfwPollEvents();
