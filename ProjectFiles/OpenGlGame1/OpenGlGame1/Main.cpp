@@ -64,12 +64,20 @@ void Main::init() {
 
     glViewport(0, 0, 800, 600);
 
-
+    glfwSetWindowUserPointer(window, this);//set the pointer
 
     // Set framebuffer size callback (this was missing)
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);//lock mouse to scrreen 
+    //using a lambda
+    glfwSetCursorPosCallback(window, [](GLFWwindow* window, double xpos, double ypos) {
+        // Retrieve the instance pointer from the user pointer.
+        Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
+        if (mainInstance) {
+            mainInstance->mouse_callback(window, xpos, ypos);
+        } 
+        }); 
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -96,18 +104,47 @@ void Main::processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
 
-    //cam mouse movement
-    lookDirection.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    lookDirection.y = sin(glm::radians(pitch));
-    lookDirection.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    
 
-  //  glfwSetCursorPosCallback(window, mouse_callback);// mouse input section https://learnopengl.com/Getting-started/Camera
+    
 
 
 }
 
 void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
+    if (firstMouse)//stops large 1st jump
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    //calculate difference since last frame
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed since y-coordinates range from bottom to top
+    lastX = xpos;
+    lastY = ypos;
+
+    const float sensitivity = 0.1f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    //add offset to stored rotation values
+    yaw += xoffset;
+    pitch += yoffset;
+
+    //vertical clamping
+    if (pitch > 89.0f)
+        pitch = 89.0f;
+    if (pitch < -89.0f)
+        pitch = -89.0f;
+
+    //do the movement part
+    lookDirection.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    lookDirection.y = sin(glm::radians(pitch));
+    lookDirection.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(lookDirection);//set cam front to new direcction
 }
 
 
