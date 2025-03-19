@@ -107,14 +107,22 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 		// Check if the face should be culled (hidden)
 		bool cullFace = false;
 
-		//check neighboring faces
+		// Convert to local chunk space for safe indexing
+		int localX = int(pos.x) % chunkSize;
+		int localY = int(pos.y) % chunkSize;
+		int localZ = int(pos.z) % chunkSize;
+		if (localX < 0) localX += chunkSize;
+		if (localY < 0) localY += chunkSize;
+		if (localZ < 0) localZ += chunkSize;
+
+		// Check neighboring faces using chunk-relative indexing
 		switch (f) {
-		case 0: cullFace = isBlockSolid(pos.x, pos.y, pos.z - 1); break; // Front
-		case 1: cullFace = isBlockSolid(pos.x, pos.y, pos.z + 1); break; // Back		
-		case 2: cullFace = isBlockSolid(pos.x - 1, pos.y, pos.z); break; // Left
-		case 3: cullFace = isBlockSolid(pos.x + 1, pos.y, pos.z); break; // Right
-		case 4: cullFace = isBlockSolid(pos.x, pos.y + 1, pos.z); break; // Top
-		case 5: cullFace = isBlockSolid(pos.x, pos.y - 1, pos.z); break; // Bottom
+		case 0: cullFace = isBlockSolid(localX, localY, localZ - 1); break; // Front
+		case 1: cullFace = isBlockSolid(localX, localY, localZ + 1); break; // Back		
+		case 2: cullFace = isBlockSolid(localX - 1, localY, localZ); break; // Left
+		case 3: cullFace = isBlockSolid(localX + 1, localY, localZ); break; // Right
+		case 4: cullFace = isBlockSolid(localX, localY + 1, localZ); break; // Top
+		case 5: cullFace = isBlockSolid(localX, localY - 1, localZ); break; // Bottom
 		}
 
 

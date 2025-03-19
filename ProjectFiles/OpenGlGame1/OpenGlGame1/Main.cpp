@@ -282,7 +282,7 @@ void Main::render() {
 
 void Main::addChunks() {
 
-    chunks.emplace_back(0, 0, 0);//add a chunk to array
+    chunks.emplace_back(0, -1, 0);//add a chunk to array
     chunks[0].generateMesh();
 }
 
