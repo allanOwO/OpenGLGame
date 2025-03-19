@@ -23,7 +23,6 @@ public:
 	Chunk(int x, int y, int z);//constructor
 	
 	void generateMesh();//creates chunk mesh
-	void render();//renders chunk
 
 	unsigned int VBO, VAO, EBO;
 	std::vector<unsigned int>indices;//index data for rendering
