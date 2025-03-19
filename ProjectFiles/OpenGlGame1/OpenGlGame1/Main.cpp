@@ -248,48 +248,33 @@ void Main::render() {
 
     shader->use();
 
-    //define transform matricies
-    glm::mat4 model = glm::mat4(1.0f);
-    // Rotate the object
-    model = glm::rotate(model, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f)); 
-
-    glm::mat4 view = glm::mat4(1.0f);
-    view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    //vie and projection matrices
     //lookat(position, target, up)
-  
+    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
 
-    glm::mat4 projection;
-    projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    //pass view and projection matrices to shader
+    glUniformMatrix4fv(glGetUniformLocation(shader->ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(shader->ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-    // Pass the transformation matrices to the shader
-    unsigned int modelLoc = glGetUniformLocation(shader->ID, "model");
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    //model matrice for rotating cube
+    glm::mat4 cubeModel = glm::mat4(1.0f);
+    // Rotate the object
+    cubeModel = glm::rotate(cubeModel, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f)); 
 
-    unsigned int viewLoc = glGetUniformLocation(shader->ID, "view"); 
-    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(cubeModel)); 
 
-    unsigned int projLoc = glGetUniformLocation(shader->ID, "projection");
-    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-    //for texturing
-    glActiveTexture(GL_TEXTURE0); 
-    glBindTexture(GL_TEXTURE_2D, texture); 
-    
-
-    // update the uniform color
-    float timeValue = glfwGetTime();
-    float greenValue = sin(timeValue) / 2.0f + 0.5f;
-    
-    //pass the information to the shader
-    //shader->setVec4("ourColour",glm::vec4(0, greenValue,0,1.0f));
-    //shader->setInt("ourTexture", 0);
-
-    //v to draw a triangle from array
+    //draw the rotating cube
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
 
     
+    //Model Matrix for Static Chunks
+    glm::mat4 chunkModel = glm::mat4(1.0f);
+    glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(chunkModel));
+
+    //draw the chunk
     glBindVertexArray(chunks[0].VAO);
     glDrawElements(GL_TRIANGLES, chunks[0].indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
@@ -297,7 +282,7 @@ void Main::render() {
 
 void Main::addChunks() {
 
-    chunks.emplace_back(0, 0, 0);//add a chunk to array
+    chunks.emplace_back(1, 0, 0);//add a chunk to array
     chunks[0].generateMesh();
 }
 

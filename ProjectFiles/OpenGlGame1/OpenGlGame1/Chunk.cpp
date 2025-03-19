@@ -13,6 +13,12 @@ Chunk::Chunk(int x, int y, int z) : chunkX(x), chunkY(y), chunkZ(z) {
 	}
 }
 
+Chunk::~Chunk() {
+	glDeleteVertexArrays(1, &VAO);
+	glDeleteBuffers(1, &VBO);
+	glDeleteBuffers(1, &EBO);
+}
+
 void Chunk::generateMesh() {
 	std::vector<float> vertices;
 	indices.clear();
@@ -58,7 +64,12 @@ void Chunk::generateMesh() {
 }
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {
-	glm::vec3 pos = block.position;
+
+	//block position accounting for chunmk position
+	glm::vec3 pos = glm::vec3(chunkX * chunkSize + block.position.x,
+		chunkY * chunkSize + block.position.y,
+		chunkZ * chunkSize + block.position.z);
+
 	float size = 1.0f;
 	glm::vec3 color(0.6f, 0.4f, 0.2f); // Brown color for dirt
 
@@ -78,12 +89,12 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 
 	// Face definitions (6 faces, each using 4 unique vertices)
 	int faces[6][4] = {
-		{0, 1, 2, 3}, // Front
-		{5, 4, 7, 6}, // Back
-		{4, 0, 3, 7}, // Left
-		{1, 5, 6, 2}, // Right
-		{3, 2, 6, 7}, // Top
-		{4, 5, 1, 0}  // Bottom
+	{3, 2, 1, 0}, // Front
+	{6, 7, 4, 5}, // Back
+	{7, 3, 0, 4}, // Left
+	{2, 6, 5, 1}, // Right
+	{7, 6, 2, 3}, // Top
+	{0, 1, 5, 4}  // Bottom
 	};
 
 	unsigned int baseIndex = vertices.size() / 8;

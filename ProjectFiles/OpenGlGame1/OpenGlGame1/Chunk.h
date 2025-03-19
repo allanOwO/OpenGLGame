@@ -21,6 +21,7 @@ public:
 	static const int chunkSize = 4;
 
 	Chunk(int x, int y, int z);//constructor
+	~Chunk();
 	
 	void generateMesh();//creates chunk mesh
 
