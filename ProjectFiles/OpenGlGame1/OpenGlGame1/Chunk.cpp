@@ -1,13 +1,14 @@
 #include "Chunk.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <iostream>
 
 Chunk::Chunk(int x, int y, int z) : chunkX(x), chunkY(y), chunkZ(z) {
 	//initialize chunk blocks
 	for (int i = 0;i < chunkSize;i++) {//y
 		for (int j = 0;j < chunkSize;j++) {//x
 			for (int k = 0;k < chunkSize;k++) {//z
-				blocks.push_back({ BlockType::DIRT,glm::vec3(i,j,k) });
+				blocks.push_back({ BlockType::DIRT,glm::vec3(j,i,k) });
 			}
 		}
 	}
@@ -40,11 +41,11 @@ void Chunk::generateMesh() {
 
 	glGenBuffers(1, &VBO);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_DYNAMIC_DRAW); 
 
 	glGenBuffers(1, &EBO);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_DYNAMIC_DRAW); 
 
 	// Position
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
@@ -103,6 +104,23 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 	for (int f = 0; f < 6; f++) {
 		int* face = faces[f];
 
+		// Check if the face should be culled (hidden)
+		bool cullFace = false;
+
+		//check neighboring faces
+		switch (f) {
+		case 0: cullFace = isBlockSolid(pos.x, pos.y, pos.z - 1); break; // Front
+		case 1: cullFace = isBlockSolid(pos.x, pos.y, pos.z + 1); break; // Back		
+		case 2: cullFace = isBlockSolid(pos.x - 1, pos.y, pos.z); break; // Left
+		case 3: cullFace = isBlockSolid(pos.x + 1, pos.y, pos.z); break; // Right
+		case 4: cullFace = isBlockSolid(pos.x, pos.y + 1, pos.z); break; // Top
+		case 5: cullFace = isBlockSolid(pos.x, pos.y - 1, pos.z); break; // Bottom
+		}
+
+
+		// Skip adding the face if it is culled
+		if (cullFace) continue;
+
 		// Add 4 vertices for the current face
 		for (int i = 0; i < 4; i++) {
 			vertices.push_back(cubeVertices[face[i]].x);
@@ -126,4 +144,10 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 
 		baseIndex += 4; // Move index forward (4 per face)
 	}
+}
+
+bool Chunk::isBlockSolid(int x, int y, int z) {
+	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize)
+		return false; // Treat out-of-bounds as empty space
+	return blocks[(y * chunkSize * chunkSize) + (x * chunkSize) + z].type != BlockType::AIR;
 }

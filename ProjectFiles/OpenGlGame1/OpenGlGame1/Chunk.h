@@ -35,5 +35,6 @@ private:
 	
 
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block); 
+	bool isBlockSolid(int x, int y, int z);
 };
 
