@@ -9,6 +9,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "Chunk.h"
+
 class Main
 {
 public:
@@ -53,5 +55,8 @@ private:
 
 	//mouse movement
 	float lastX = 400, lastY = 300;
+
+	std::vector<Chunk> chunks;
+	void addChunks();
 };
 

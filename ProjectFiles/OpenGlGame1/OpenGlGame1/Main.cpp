@@ -5,7 +5,6 @@
 #define STB_IMAGE_IMPLEMENTATION  // This tells stb to include the implementation
 #include "stb/stb_image.h"          // Path to the stb_image.h file
 
-#include "Chunk.h"
 
 
 Main::Main() : window(nullptr){
@@ -245,7 +244,7 @@ void Main::render() {
     // set background & clear screen
     glClearColor(0.1, 0.4, 0.6, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-    glEnable(GL_DEPTH_TEST); 
+    
 
     shader->use();
 
@@ -291,15 +290,25 @@ void Main::render() {
     //v to draw a triangle from array
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+
+    glBindVertexArray(chunks[0].VAO);
+    glDrawElements(GL_TRIANGLES, chunks[0].indices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
+void Main::addChunks() {
+
+    chunks.emplace_back(0, 0, 0);//add a chunk to array
+    chunks[0].generateMesh();
 }
 
 void Main::run() {
 
     createBufferObjects();
+    addChunks();
 
     createShaders();
-    Chunk chunk(0, 0, 0);
-    chunk.generateMesh();
 
     //texture code ---------------
     int width, height, nrChannels;
@@ -321,14 +330,17 @@ void Main::run() {
     stbi_image_free(data);//free memory
     //texture code ---------------
 
-
+    glEnable(GL_CULL_FACE);   // Enable face culling 
+    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
+    glEnable(GL_DEPTH_TEST); 
+     
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         //input
         processInput(window);
 
         render();
-        chunk.render(); 
 
         glfwSwapBuffers(window);
         glfwPollEvents();

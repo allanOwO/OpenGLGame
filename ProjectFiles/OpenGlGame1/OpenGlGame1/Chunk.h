@@ -25,11 +25,14 @@ public:
 	void generateMesh();//creates chunk mesh
 	void render();//renders chunk
 
+	unsigned int VBO, VAO, EBO;
+	std::vector<unsigned int>indices;//index data for rendering
+
 private:
 	int chunkX, chunkY, chunkZ;//chunk position
 	std::vector<Block> blocks;//list of all blocks in chunk
-	unsigned int VBO, VAO, EBO;
-	std::vector<unsigned int>indices;//index data for rendering
+	
+	
 
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block); 
 };
