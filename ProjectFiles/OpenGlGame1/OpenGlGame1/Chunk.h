@@ -18,7 +18,7 @@ struct Block
 class Chunk
 {
 public:
-	static const int chunkSize = 16;
+	static const int chunkSize = 4;
 
 	Chunk(int x, int y, int z);//constructor
 	

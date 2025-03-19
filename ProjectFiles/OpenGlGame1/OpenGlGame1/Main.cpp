@@ -254,9 +254,6 @@ void Main::render() {
     model = glm::rotate(model, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f)); 
 
     glm::mat4 view = glm::mat4(1.0f);
-    // Translate the scene in the opposite direction to simulate moving the camera backwards.
-    view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
-
     view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     //lookat(position, target, up)
   
@@ -284,14 +281,15 @@ void Main::render() {
     float greenValue = sin(timeValue) / 2.0f + 0.5f;
     
     //pass the information to the shader
-    shader->setVec4("ourColour",glm::vec4(0, greenValue,0,1.0f));
-    shader->setInt("ourTexture", 0);
+    //shader->setVec4("ourColour",glm::vec4(0, greenValue,0,1.0f));
+    //shader->setInt("ourTexture", 0);
 
     //v to draw a triangle from array
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
 
+    
     glBindVertexArray(chunks[0].VAO);
     glDrawElements(GL_TRIANGLES, chunks[0].indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
@@ -334,6 +332,9 @@ void Main::run() {
     glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
+
+    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode
+
      
     // Main loop
     while (!glfwWindowShouldClose(window)) {
