@@ -7,7 +7,7 @@
 
 
 
-Main::Main() : window(nullptr){
+Main::Main() : window(nullptr),width(1280),height(720){
 
     init();
 }
@@ -27,7 +27,15 @@ std::string Main::loadShader(const char* filepath) {
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
+    //update viewport
     glViewport(0, 0, width, height);
+
+    // Update the width and height in the Main class
+    Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
+    if (mainInstance) {
+        mainInstance->width = width;
+        mainInstance->height = height; 
+    }
 }
 
 void Main::init() {
@@ -45,7 +53,7 @@ void Main::init() {
 
 
     // Create a window
-    window = glfwCreateWindow(800, 600, "OpenGL Window", NULL, NULL);
+    window = glfwCreateWindow(width, height, "OpenGL Window", NULL, NULL);
     if (!window) {
         std::cerr << "Failed to create GLFW window!" << std::endl;
         glfwTerminate();
@@ -62,13 +70,10 @@ void Main::init() {
         exit(-1);
     }
 
-
-    glViewport(0, 0, 800, 600);
-
     //set the pointer
     glfwSetWindowUserPointer(window, this);
 
-    // Set framebuffer size callback (this was missing)
+    // Set framebuffer size callback  
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     //lock mouse to scrreen
@@ -153,7 +158,7 @@ void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
 }
 
-void Main::createBufferObjects() {
+void Main::createCube() {
 
     float vertices[] = {
         // positions          // colors           // texture coords
@@ -251,7 +256,7 @@ void Main::render() {
     //vie and projection matrices
     //lookat(position, target, up)
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
 
     //pass view and projection matrices to shader
     glUniformMatrix4fv(glGetUniformLocation(shader->ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -286,14 +291,8 @@ void Main::addChunks() {
     chunks[0].generateMesh();
 }
 
-void Main::run() {
+void Main::getTextures() {
 
-    createBufferObjects();
-    addChunks();
-
-    createShaders();
-
-    //texture code ---------------
     int width, height, nrChannels;
     unsigned char* data = stbi_load("../ResourceFiles/container.jpg", &width, &height, &nrChannels, 0);
 
@@ -302,7 +301,7 @@ void Main::run() {
         exit(-1); // Exit if the texture couldn't be loaded
     }
 
-    glGenTextures(1, &texture); 
+    glGenTextures(1, &texture);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
@@ -310,8 +309,18 @@ void Main::run() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
 
-    stbi_image_free(data);//free memory
-    //texture code ---------------
+    stbi_image_free(data);//free memory 
+
+}
+
+void Main::run() {
+
+    createCube();
+    addChunks();
+
+    getTextures();
+    createShaders();
+
 
     glEnable(GL_CULL_FACE);   // Enable face culling 
     glCullFace(GL_BACK);      // Cull back faces (only render front faces) 

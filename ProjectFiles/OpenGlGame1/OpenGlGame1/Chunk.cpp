@@ -74,6 +74,8 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 	float size = 1.0f;
 	glm::vec3 color(0.6f, 0.4f, 0.2f); // Brown color for dirt
 
+	//glBindTexture(GL_TEXTURE_2D,t)
+
 	// Cube vertices positions (8 unique)
 	glm::vec3 cubeVertices[8] = {
 		{pos.x, pos.y, pos.z}, {pos.x + size, pos.y, pos.z},

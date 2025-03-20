@@ -16,6 +16,7 @@ class Main
 public:
 	Main();
 	~Main();
+	float width, height;
 
 	void run();
 
@@ -24,14 +25,16 @@ private:
 	void init(); // Initialize GLFW, GLAD, etc.
 	void processInput(GLFWwindow* window); // Process user input
 	void createShaders();
-	void createBufferObjects();
+	void createCube();
 	void render();
+	void getTextures();
 
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
 
 	GLFWwindow* window; // Window pointer
+	
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int EBO, VBO, VAO, texture;//element buffer, vertex buffer, vertext array
