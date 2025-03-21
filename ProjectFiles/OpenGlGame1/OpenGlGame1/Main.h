@@ -32,6 +32,7 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
+	void drawChunks();
 
 	GLFWwindow* window; // Window pointer
 	
@@ -51,7 +52,7 @@ private:
 	float yaw = -90.0f;//offest at beginign to allign to -z
 	float pitch = 0.0f;
 
-	const float camSpeedBase = 2.0f;
+	const float camSpeedBase = 5.0f;
 
 	float deltaTime = 0.0f;	// Time between current frame and last frame
 	float lastFrame = 0.0f; // Time of last frame
@@ -60,6 +61,7 @@ private:
 	float lastX = 400, lastY = 300;
 
 	std::vector<Chunk> chunks;
+	std::vector<glm::mat4> chunkModels;//array of chunk models
 	void addChunks();
 };
 

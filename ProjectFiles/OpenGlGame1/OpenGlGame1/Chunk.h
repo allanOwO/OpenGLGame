@@ -18,9 +18,9 @@ struct Block
 class Chunk
 {
 public:
-	static const int chunkSize = 4;
+	static constexpr int chunkSize = 16;
 
-	Chunk(int x, int y, int z);//constructor
+	Chunk(glm::vec3 position);//constructor
 	~Chunk();
 	
 	void generateMesh();//creates chunk mesh
@@ -28,9 +28,12 @@ public:
 	unsigned int VBO, VAO, EBO;
 	std::vector<unsigned int>indices;//index data for rendering
 
+	glm::vec3 chunkPosition;
+
+
 private:
-	int chunkX, chunkY, chunkZ;//chunk position
-	std::vector<Block> blocks;//list of all blocks in chunk
+	
+	std::vector<std::vector<std::vector<Block>>> blocks;//list of all blocks in chunk
 	
 	
 

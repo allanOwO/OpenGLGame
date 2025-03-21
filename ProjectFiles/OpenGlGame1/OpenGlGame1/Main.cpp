@@ -5,6 +5,9 @@
 #define STB_IMAGE_IMPLEMENTATION  // This tells stb to include the implementation
 #include "stb/stb_image.h"          // Path to the stb_image.h file
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/string_cast.hpp>
+
 
 
 Main::Main() : window(nullptr),width(1280),height(720){
@@ -86,7 +89,7 @@ void Main::init() {
         if (mainInstance) {
             mainInstance->mouse_callback(window, xpos, ypos);
         } 
-        }); 
+    }); 
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -256,12 +259,13 @@ void Main::render() {
     //vie and projection matrices
     //lookat(position, target, up)
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 100.0f);
 
     //pass view and projection matrices to shader
     glUniformMatrix4fv(glGetUniformLocation(shader->ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(glGetUniformLocation(shader->ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
+    
     //model matrice for rotating cube
     glm::mat4 cubeModel = glm::mat4(1.0f);
     // Rotate the object
@@ -275,20 +279,43 @@ void Main::render() {
     glBindVertexArray(0);
 
     
-    //Model Matrix for Static Chunks
-    glm::mat4 chunkModel = glm::mat4(1.0f);
-    glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(chunkModel));
-
-    //draw the chunk
-    glBindVertexArray(chunks[0].VAO);
-    glDrawElements(GL_TRIANGLES, chunks[0].indices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
+    drawChunks();
 }
 
 void Main::addChunks() {
 
-    chunks.emplace_back(0, -1, 0);//add a chunk to array
-    chunks[0].generateMesh();
+    
+    for (int x = 0; x <16; x++) {
+        for (int z = 0; z < 16; z++) {
+            glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
+                0,
+                static_cast<int>(z * Chunk::chunkSize));
+            // Create a new chunk at (x, 0, z)
+            chunks.emplace_back(chunkPos);
+            
+            // Generate the mesh for the new chunk
+            chunks.back().generateMesh();
+
+            // Add a new model matrix for this chunk (initially an identity matrix)
+            chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
+            std::cout << chunkPos.x << chunkPos.z<<"\n";
+        }
+    }
+    
+}
+
+void Main::drawChunks() {
+
+    for (int i = 0;i < chunkModels.size();i++) {
+
+        glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(chunkModels[i]));
+
+        //draw the chunk
+        glBindVertexArray(chunks[i].VAO);
+        glDrawElements(GL_TRIANGLES, chunks[i].indices.size(), GL_UNSIGNED_INT, 0); 
+        glBindVertexArray(0); 
+    }
+
 }
 
 void Main::getTextures() {
@@ -322,8 +349,8 @@ void Main::run() {
     createShaders();
 
 
-    glEnable(GL_CULL_FACE);   // Enable face culling 
-    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+   // glEnable(GL_CULL_FACE);   // Enable face culling 
+    //glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
 

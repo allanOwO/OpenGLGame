@@ -3,12 +3,15 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 
-Chunk::Chunk(int x, int y, int z) : chunkX(x), chunkY(y), chunkZ(z) {
-	//initialize chunk blocks
+Chunk::Chunk(glm::vec3 position) : chunkPosition(position) {
+
+	/// Initialize chunk blocks using 3D vector storage
+	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkSize, std::vector<Block>(chunkSize))); 
+
 	for (int i = 0;i < chunkSize;i++) {//y
 		for (int j = 0;j < chunkSize;j++) {//x
 			for (int k = 0;k < chunkSize;k++) {//z
-				blocks.push_back({ BlockType::DIRT,glm::vec3(j,i,k) });
+				blocks[j][i][k] = {BlockType::DIRT,glm::vec3(j,i,k)};//j,i,k = x,y,z
 			}
 		}
 	}
@@ -28,13 +31,14 @@ void Chunk::generateMesh() {
 	for (int y = 0;y < chunkSize;y++) {//y
 		for (int x = 0;x < chunkSize;x++) {//x
 			for (int z = 0;z < chunkSize;z++) {//z
-				Block& block = blocks[y * chunkSize * chunkSize + x * chunkSize + z];
+				Block& block = blocks[x][y][z]; 
 				if (block.type == BlockType::AIR) continue;//dont draw faces for air
 
 				generateBlockFaces(vertices, indices, block);//create each blocks faces
 			}
 		}
 	}
+
 	//create buffers
 	glGenVertexArrays(1, &VAO);
 	glBindVertexArray(VAO);
@@ -66,15 +70,11 @@ void Chunk::generateMesh() {
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {
 
-	//block position accounting for chunmk position
-	glm::vec3 pos = glm::vec3(chunkX * chunkSize + block.position.x,
-		chunkY * chunkSize + block.position.y,
-		chunkZ * chunkSize + block.position.z);
+	//block position in chunk local space
+	glm::vec3 pos = block.position;
 
 	float size = 1.0f;
 	glm::vec3 color(0.6f, 0.4f, 0.2f); // Brown color for dirt
-
-	//glBindTexture(GL_TEXTURE_2D,t)
 
 	// Cube vertices positions (8 unique)
 	glm::vec3 cubeVertices[8] = {
@@ -159,5 +159,5 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 bool Chunk::isBlockSolid(int x, int y, int z) {
 	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize)
 		return false; // Treat out-of-bounds as empty space
-	return blocks[(y * chunkSize * chunkSize) + (x * chunkSize) + z].type != BlockType::AIR;
+	return blocks[x][y][z].type != BlockType::AIR;
 }
