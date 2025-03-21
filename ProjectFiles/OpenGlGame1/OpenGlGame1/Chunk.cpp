@@ -100,7 +100,7 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 	glm::vec3 pos = block.position;
 
 	float size = 1.0f;
-	glm::vec3 color(0.6f, 0.4f, 0.2f); // Brown color for dirt
+	glm::vec3 color(0.5f, 0.5f, 0.5f);//default colour
 
 	// Cube vertices positions (8 unique)
 	glm::vec3 cubeVertices[8] = {

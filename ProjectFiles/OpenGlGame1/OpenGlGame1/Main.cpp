@@ -369,6 +369,22 @@ void Main::getTextures() {
     textureMap[BlockType::STONE] = stoneTex;
 }
 
+void Main::doFps() {
+    float currentTime = glfwGetTime();
+    frameCount++;
+
+    // Update FPS every second
+    if (currentTime - lastFPSTime >= 1.0f) {
+        fps = frameCount / (currentTime - lastFPSTime);
+        frameCount = 0;
+        lastFPSTime = currentTime;
+
+        // Update window title with FPS
+        std::string title = "My Game - FPS: " + std::to_string(fps);
+        glfwSetWindowTitle(window, title.c_str());
+    }
+}
+
 void Main::run() {
 
     createCube();
@@ -395,6 +411,7 @@ void Main::run() {
         processInput(window);
 
         render();
+        doFps();
 
         glfwSwapBuffers(window);
         glfwPollEvents();

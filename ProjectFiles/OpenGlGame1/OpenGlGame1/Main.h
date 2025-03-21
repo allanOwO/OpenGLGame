@@ -29,6 +29,7 @@ private:
 	void createCube();
 	void render();
 	void getTextures();
+	void doFps();
 
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
@@ -63,8 +64,14 @@ private:
 	//mouse movement
 	float lastX = 400, lastY = 300;
 
+	//chunk stuff
 	std::vector<Chunk> chunks;
 	std::vector<glm::mat4> chunkModels;//array of chunk models
 	void addChunks();
+
+	//fps tracking
+	float lastFPSTime = 0.0f; // Time of the last FPS update
+	int frameCount = 0;        // Number of frames since last update
+	float fps = 0.0f;          // Current FPS value
 };
 
