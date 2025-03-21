@@ -2,6 +2,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <FastNoiseLite.h>
 
 Chunk::Chunk(glm::vec3 position)
 	: chunkPosition(position) {
@@ -9,20 +10,39 @@ Chunk::Chunk(glm::vec3 position)
 	/// Initialize chunk blocks using 3D vector storage
 	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkSize, std::vector<Block>(chunkSize))); 
 
-	for (int i = 0;i < chunkSize;i++) {//y
-		for (int j = 0;j < chunkSize;j++) {//x
-			for (int k = 0;k < chunkSize;k++) {//z
+	FastNoiseLite noise;
+	noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+	noise.SetFrequency(0.05f); // Adjust for terrain scale
 
+	for (int x = 0; x < chunkSize; x++) {
+		for (int z = 0; z < chunkSize; z++) {
+			// Compute world coordinates for noise
+			float worldX = chunkPosition.x + x;
+			float worldZ = chunkPosition.z + z;
+			// Get height from noise (scaled to 0-15 range) 
+			float noiseValue = noise.GetNoise(worldX, worldZ); // Returns -1 to 1
+			int baseHeight = chunkSize -6; // Start at Y = 8 (middle of the chunk)
+			float heightVariation = (noiseValue + 1.0f) * 0.3f * (chunkSize / 2.0f);//0.3 is the varieation
+			int height = static_cast<int>(baseHeight + heightVariation); // Range: 8 to 16
+
+			// Clamp height to valid range
+			height = std::max(0, std::min(height, chunkSize - 1));
+
+			for (int y = 0; y < chunkSize; y++) {
 				BlockType type;
-				if (i < 10)
+				if (y < height - 2) {
 					type = BlockType::STONE;
-
-				else if (i < chunkSize - 1)
+				}
+				else if (y == height - 2) {
 					type = BlockType::DIRT;
-				else
+				}
+				else if (y == height - 1) {
 					type = BlockType::GRASS;
-
-				blocks[j][i][k] = {type,glm::vec3(j,i,k)};//j,i,k = x,y,z
+				}
+				else {
+					type = BlockType::AIR;
+				}
+				blocks[x][y][z] = { type, glm::vec3(x, y, z) };
 			}
 		}
 	}

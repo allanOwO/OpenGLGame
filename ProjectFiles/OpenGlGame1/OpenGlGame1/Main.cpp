@@ -285,8 +285,8 @@ void Main::render() {
 void Main::addChunks() {
 
     
-    for (int x = 0; x <1; x++) {
-        for (int z = 0; z < 1; z++) {
+    for (int x = 0; x <10; x++) {
+        for (int z = 0; z < 10; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
                 0,
                 static_cast<int>(z * Chunk::chunkSize));
