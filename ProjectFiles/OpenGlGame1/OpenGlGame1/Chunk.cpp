@@ -5,38 +5,39 @@
 #include <FastNoiseLite.h>
 
 Chunk::Chunk(glm::vec3 position)
-	: chunkPosition(position) {
+	: chunkPosition(position),VAO(0),VBO(0),EBO(0) {
 
 	/// Initialize chunk blocks using 3D vector storage
-	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkSize, std::vector<Block>(chunkSize))); 
+	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkHeight, std::vector<Block>(chunkSize))); 
 
 	FastNoiseLite noise;
 	noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-	noise.SetFrequency(0.05f); // Adjust for terrain scale
+	noise.SetFrequency(0.01f); // Lower frequency for smoother terrain
+	noise.SetFractalType(FastNoiseLite::FractalType_FBm);
+	noise.SetFractalOctaves(4);
+	noise.SetFractalLacunarity(2.0f);
+	noise.SetFractalGain(0.5f);
 
-	for (int x = 0; x < chunkSize; x++) {
+	/*
+	for (int x = 0; x < chunkSize; x++) { 
 		for (int z = 0; z < chunkSize; z++) {
-			// Compute world coordinates for noise
 			float worldX = chunkPosition.x + x;
 			float worldZ = chunkPosition.z + z;
-			// Get height from noise (scaled to 0-15 range) 
-			float noiseValue = noise.GetNoise(worldX, worldZ); // Returns -1 to 1
-			int baseHeight = chunkSize -6; // Start at Y = 8 (middle of the chunk)
-			float heightVariation = (noiseValue + 1.0f) * 0.3f * (chunkSize / 2.0f);//0.3 is the varieation
-			int height = static_cast<int>(baseHeight + heightVariation); // Range: 8 to 16
+			float noiseValue = noise.GetNoise(worldX, worldZ); // -1 to 1
+			int baseHeight = chunkHeight - 8;
+			float heightVariation = (noiseValue + 1.0f) * 0.5f * (chunkHeight / 2.0f);
+			int height = static_cast<int>(baseHeight + heightVariation + 0.5f); // Round for smoothness
+			height = std::max(0, std::min(height, chunkHeight - 1));
 
-			// Clamp height to valid range
-			height = std::max(0, std::min(height, chunkSize - 1));
-
-			for (int y = 0; y < chunkSize; y++) {
+			for (int y = 0; y < chunkHeight; y++) {
 				BlockType type;
-				if (y < height - 2) {
+				if (y < height - 3) {
 					type = BlockType::STONE;
 				}
-				else if (y == height - 2) {
+				else if (y <= height - 2) {
 					type = BlockType::DIRT;
 				}
-				else if (y == height - 1) {
+				else if (y == height-1) {
 					type = BlockType::GRASS;
 				}
 				else {
@@ -46,6 +47,31 @@ Chunk::Chunk(glm::vec3 position)
 			}
 		}
 	}
+	*/
+	
+
+	for (int x = 0; x < chunkSize; x++) {
+		for (int z = 0; z < chunkSize; z++) {		
+			for (int y = 0; y < chunkHeight; y++) {
+				BlockType type;
+				if (y < chunkHeight - 3) {
+					type = BlockType::STONE;
+				}
+				else if (y <= chunkHeight - 2) {
+					type = BlockType::DIRT;
+				}
+				else if (y == chunkHeight - 1) {
+					type = BlockType::GRASS;
+				}
+				else {
+					type = BlockType::AIR;
+				}
+				blocks[x][y][z] = { type, glm::vec3(x, y, z) };
+			}
+		}
+	}
+
+	//std::cout << "chunk pos" << chunkPosition.x << " " << chunkPosition.z<< "\n";
 }
 
 Chunk::~Chunk() {
@@ -59,7 +85,7 @@ void Chunk::generateMesh() {
 	indicesByType.clear();
 	baseIndicesByType.clear();
 
-	for (int y = 0; y < chunkSize; y++) {
+	for (int y = 0; y < chunkHeight; y++) {
 		for (int x = 0; x < chunkSize; x++) {
 			for (int z = 0; z < chunkSize; z++) {
 				Block& block = blocks[x][y][z];
@@ -75,6 +101,8 @@ void Chunk::generateMesh() {
 
 	glGenBuffers(1, &VBO);
 	glGenBuffers(1, &EBO);
+	std::cout << "Chunk at " << chunkPosition.x << "," << chunkPosition.z
+		<< ": Generated EBO ID = " << EBO << std::endl; 
 
 	// Concatenate all vertices into one VBO, but track offsets
 	std::vector<float> allVertices;
@@ -103,6 +131,11 @@ void Chunk::generateMesh() {
 	glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	GLint boundEBO;
+	glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+	std::cout << "Chunk at " << chunkPosition.x << "," << chunkPosition.z
+		<< ": After binding EBO, bound EBO = " << boundEBO << " (expected " << EBO << ")" << std::endl;
+
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
 
 	// Vertex attributes
@@ -114,6 +147,10 @@ void Chunk::generateMesh() {
 	glEnableVertexAttribArray(2);
 
 	glBindVertexArray(0);
+
+	glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+	std::cout << "After setting up chunk at " << chunkPosition.x << "," << chunkPosition.z
+		<< ": EBO = " << boundEBO << " (expected " << EBO << ")" << std::endl; 
 }
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {
@@ -123,6 +160,9 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 
 	float size = 1.0f;
 	glm::vec3 color(0.5f, 0.5f, 0.5f);//default colour
+	if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
+		color = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
+	}
 
 	// Cube vertices positions (8 unique)
 	glm::vec3 cubeVertices[8] = {
@@ -159,10 +199,10 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 
 		// Convert to local chunk space for safe indexing
 		int localX = int(pos.x) % chunkSize;
-		int localY = int(pos.y) % chunkSize;
+		int localY = int(pos.y) % chunkHeight;
 		int localZ = int(pos.z) % chunkSize;
 		if (localX < 0) localX += chunkSize;
-		if (localY < 0) localY += chunkSize;
+		if (localY < 0) localY += chunkHeight;
 		if (localZ < 0) localZ += chunkSize;
 
 		// Check neighboring faces using chunk-relative indexing
@@ -201,11 +241,13 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 		indices.push_back(baseIndex + 3);
 
 		baseIndex += 4; // Move index forward (4 per face)
+
+		
 	}
 }
 
 bool Chunk::isBlockSolid(int x, int y, int z) {
-	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkSize || z < 0 || z >= chunkSize)
+	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize)
 		return false; // Treat out-of-bounds as empty space
 	return blocks[x][y][z].type != BlockType::AIR;
 }

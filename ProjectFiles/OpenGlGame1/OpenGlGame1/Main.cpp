@@ -213,12 +213,6 @@ void Main::createCube() {
         1, 2, 3    // second triangle
     };
 
-    //create element buffer object, used for more complex shapes, eg square
-    glGenBuffers(1, &EBO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-
     //create vertex array object
     glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);//bind VAO
@@ -259,7 +253,7 @@ void Main::render() {
     //vie and projection matrices
     //lookat(position, target, up)
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 100.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
 
     //pass view and projection matrices to shader
     glUniformMatrix4fv(glGetUniformLocation(shader->ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -274,9 +268,15 @@ void Main::render() {
     glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(cubeModel)); 
 
     //draw the rotating cube
+    /*
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); // Unbind the EBO
+    */
+    
+    
+    
 
     
     drawChunks();
@@ -284,11 +284,12 @@ void Main::render() {
 
 void Main::addChunks() {
 
+    int chunkCount = 0;
     
-    for (int x = 0; x <10; x++) {
-        for (int z = 0; z < 10; z++) {
+    for (int x = -8; x <4; x++) {
+        for (int z = -8; z < 4; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
-                0,
+                -Chunk::chunkHeight,
                 static_cast<int>(z * Chunk::chunkSize));
             // Create a new chunk at (x, 0, z)
             chunks.emplace_back(chunkPos);
@@ -298,26 +299,42 @@ void Main::addChunks() {
 
             // Add a new model matrix for this chunk (initially an identity matrix)
             chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
+            chunkCount++;
         }
     }
-    
+    std::cout << "chunk count: " << chunkCount;
 }
 
 void Main::drawChunks() {
+    static double lastTime = glfwGetTime();
+    static int chunksToRender = 0; // Start with 0, increase over time
 
-    for (int i = 0;i < chunkModels.size();i++) {
+    double currentTime = glfwGetTime();
+    if (currentTime - lastTime > 0.5) { // Change 0.5 to the delay you want (seconds)
+        chunksToRender++;
+        lastTime = currentTime;
+    }
 
+    for (int i = 0; i < chunksToRender && i < chunkModels.size(); i++) {
         glUniformMatrix4fv(glGetUniformLocation(shader->ID, "model"), 1, GL_FALSE, glm::value_ptr(chunkModels[i]));
 
-        //draw the chunk
+        // Draw the chunk
         glBindVertexArray(chunks[i].VAO);
 
+        /*
+        GLint boundEBO;
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+        std::cout << "Chunk " << i << " has EBO " << boundEBO
+            << " (expected " << chunks[i].EBO << ")" << std::endl; 
+        */
+        bool hasRendered = false;
 
         for (const auto& pair : chunks[i].verticesByType) {
             BlockType type = pair.first;
             const auto& indices = chunks[i].indicesByType[type];
 
             if (indices.empty()) continue;
+            hasRendered = true;
 
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, textureMap.at(type));
@@ -327,9 +344,13 @@ void Main::drawChunks() {
                 (void*)(chunks[i].baseIndicesByType[type] * sizeof(unsigned int)));
         }
 
-        glBindVertexArray(0); 
-    }
+        if (!hasRendered) {
+            std::cout << "Chunk at index " << i << " (pos " << chunks[i].chunkPosition.x
+                << "," << chunks[i].chunkPosition.z << ") did not render!" << std::endl;
+        }
 
+        glBindVertexArray(0);
+    }
 }
 
 void Main::getTextures() {
@@ -402,18 +423,16 @@ void Main::doFps() {
 
 void Main::run() {
 
-    createCube();
+    //createCube();
 
     getTextures(); 
-
     addChunks();
 
-    
     createShaders();
 
 
-    glEnable(GL_CULL_FACE);   // Enable face culling 
-    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    //glEnable(GL_CULL_FACE);   // Enable face culling 
+    //glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
 

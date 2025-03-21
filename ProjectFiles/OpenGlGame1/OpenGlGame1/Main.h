@@ -56,7 +56,7 @@ private:
 	float yaw = -90.0f;//offest at beginign to allign to -z
 	float pitch = 0.0f;
 
-	const float camSpeedBase = 5.0f;
+	const float camSpeedBase = 10.0f;
 
 	float deltaTime = 0.0f;	// Time between current frame and last frame
 	float lastFrame = 0.0f; // Time of last frame
