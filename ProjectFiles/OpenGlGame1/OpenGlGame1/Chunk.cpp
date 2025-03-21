@@ -4,7 +4,7 @@
 #include <iostream>
 #include <FastNoiseLite.h>
 
-Chunk::Chunk(glm::vec3 position)
+Chunk::Chunk(glm::vec3 position,int seed)
 	: chunkPosition(position),VAO(0),VBO(0),EBO(0) {
 
 	/// Initialize chunk blocks using 3D vector storage
@@ -13,8 +13,8 @@ Chunk::Chunk(glm::vec3 position)
 	FastNoiseLite noise;
 	noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
 	noise.SetFrequency(0.03f); // Lower frequency for smoother terrain
-	noise.SetSeed(1234);
-
+	
+	noise.SetSeed(seed);
 	
 	for (int x = 0; x < chunkSize; x++) { 
 		for (int z = 0; z < chunkSize; z++) {

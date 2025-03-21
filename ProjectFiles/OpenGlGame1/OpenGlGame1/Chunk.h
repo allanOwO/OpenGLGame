@@ -26,7 +26,7 @@ public:
 	static constexpr int maxTerrainHeight = 32;
 	static constexpr int baseTerrainHeight = 64;
 
-	Chunk(glm::vec3 position);//constructor
+	Chunk(glm::vec3 position,int seed);//constructor
 	~Chunk();
 
 	// Delete copy constructor and copy assignment operator

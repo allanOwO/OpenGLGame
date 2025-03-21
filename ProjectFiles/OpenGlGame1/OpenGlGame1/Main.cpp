@@ -7,6 +7,7 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
+#include<random>
 
 
 
@@ -292,7 +293,7 @@ void Main::addChunks() {
                 -Chunk::baseTerrainHeight,
                 static_cast<int>(z * Chunk::chunkSize));
             // Create a new chunk at (x, 0, z)
-            chunks.emplace_back(chunkPos);
+            chunks.emplace_back(chunkPos,seed);
             
             // Generate the mesh for the new chunk
             chunks.back().generateMesh();
@@ -398,6 +399,13 @@ void Main::doFps() {
 }
 
 void Main::run() {
+
+    if (seed == -1) {
+        std::random_device rd;
+        seed = rd();
+        std::cout << seed;
+    }
+
 
     createCube();
 

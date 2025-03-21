@@ -36,7 +36,7 @@ private:
 	std::string loadShader(const char* filepath);
 	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation;
 
-
+	int seed = -1;
 	void drawChunks();
 
 	GLFWwindow* window; // Window pointer
