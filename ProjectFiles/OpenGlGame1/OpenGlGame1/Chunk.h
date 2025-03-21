@@ -22,7 +22,9 @@ class Chunk
 {
 public:
 	static constexpr int chunkSize = 16;
-	static constexpr int chunkHeight = 32;
+	static constexpr int chunkHeight = 128;
+	static constexpr int maxTerrainHeight = 32;
+	static constexpr int baseTerrainHeight = 64;
 
 	Chunk(glm::vec3 position);//constructor
 	~Chunk();

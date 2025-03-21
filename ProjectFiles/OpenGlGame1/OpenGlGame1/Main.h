@@ -34,6 +34,9 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation;
+
+
 	void drawChunks();
 
 	GLFWwindow* window; // Window pointer
