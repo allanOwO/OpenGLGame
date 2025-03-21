@@ -285,8 +285,8 @@ void Main::render() {
 void Main::addChunks() {
 
     
-    for (int x = 0; x <16; x++) {
-        for (int z = 0; z < 16; z++) {
+    for (int x = 0; x <1; x++) {
+        for (int z = 0; z < 1; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
                 0,
                 static_cast<int>(z * Chunk::chunkSize));
@@ -298,7 +298,6 @@ void Main::addChunks() {
 
             // Add a new model matrix for this chunk (initially an identity matrix)
             chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
-            std::cout << chunkPos.x << chunkPos.z<<"\n";
         }
     }
     
@@ -312,7 +311,22 @@ void Main::drawChunks() {
 
         //draw the chunk
         glBindVertexArray(chunks[i].VAO);
-        glDrawElements(GL_TRIANGLES, chunks[i].indices.size(), GL_UNSIGNED_INT, 0); 
+
+
+        for (const auto& pair : chunks[i].verticesByType) {
+            BlockType type = pair.first;
+            const auto& indices = chunks[i].indicesByType[type];
+
+            if (indices.empty()) continue;
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, textureMap.at(type));
+            glUniform1i(glGetUniformLocation(shader->ID, "texture1"), 0);
+
+            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
+                (void*)(chunks[i].baseIndicesByType[type] * sizeof(unsigned int)));
+        }
+
         glBindVertexArray(0); 
     }
 
@@ -321,36 +335,54 @@ void Main::drawChunks() {
 void Main::getTextures() {
 
     int width, height, nrChannels;
-    unsigned char* data = stbi_load("../ResourceFiles/container.jpg", &width, &height, &nrChannels, 0);
 
+    // Load another texture for a different block type, e.g., "stone.jpg"
+    unsigned char* data = stbi_load("../ResourceFiles/dirt.jpg", &width, &height, &nrChannels, 0);
     if (!data) {
-        std::cerr << "Failed to load texture!" << std::endl;
-        exit(-1); // Exit if the texture couldn't be loaded
+        std::cerr << "Failed to load dirt texture!" << std::endl;
+        exit(-1);
     }
-
-    glGenTextures(1, &texture);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
+    GLuint dirtTex;
+    glGenTextures(1, &dirtTex);
+    glBindTexture(GL_TEXTURE_2D, dirtTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(data);
 
-    stbi_image_free(data);//free memory 
+    // Store texture ID for "dirt" block
+    textureMap[BlockType::DIRT] = dirtTex;
 
+
+    data = stbi_load("../ResourceFiles/stone.jpg", &width, &height, &nrChannels, 0);
+    if (!data) {
+        std::cerr << "Failed to load stone texture!" << std::endl;
+        exit(-1);
+    }
+    GLuint stoneTex;
+    glGenTextures(1, &stoneTex);
+    glBindTexture(GL_TEXTURE_2D, stoneTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(data);
+
+    // Store texture ID for "dirt" block
+    textureMap[BlockType::STONE] = stoneTex;
 }
 
 void Main::run() {
 
     createCube();
+
+    getTextures(); 
+
     addChunks();
 
-    getTextures();
+    
     createShaders();
 
 
-   // glEnable(GL_CULL_FACE);   // Enable face culling 
-    //glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    glEnable(GL_CULL_FACE);   // Enable face culling 
+    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
 

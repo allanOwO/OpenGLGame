@@ -3,7 +3,8 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 
-Chunk::Chunk(glm::vec3 position) : chunkPosition(position) {
+Chunk::Chunk(glm::vec3 position)
+	: chunkPosition(position) {
 
 	/// Initialize chunk blocks using 3D vector storage
 	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkSize, std::vector<Block>(chunkSize))); 
@@ -11,7 +12,15 @@ Chunk::Chunk(glm::vec3 position) : chunkPosition(position) {
 	for (int i = 0;i < chunkSize;i++) {//y
 		for (int j = 0;j < chunkSize;j++) {//x
 			for (int k = 0;k < chunkSize;k++) {//z
-				blocks[j][i][k] = {BlockType::DIRT,glm::vec3(j,i,k)};//j,i,k = x,y,z
+
+				BlockType type;
+				if (i < 10)
+					type = BlockType::STONE;
+
+				else
+					type = BlockType::DIRT;
+
+				blocks[j][i][k] = {type,glm::vec3(j,i,k)};//j,i,k = x,y,z
 			}
 		}
 	}
@@ -24,48 +33,65 @@ Chunk::~Chunk() {
 }
 
 void Chunk::generateMesh() {
-	std::vector<float> vertices;
-	indices.clear();
+	verticesByType.clear();
+	indicesByType.clear();
+	baseIndicesByType.clear();
 
-	//loop for all blocks
-	for (int y = 0;y < chunkSize;y++) {//y
-		for (int x = 0;x < chunkSize;x++) {//x
-			for (int z = 0;z < chunkSize;z++) {//z
-				Block& block = blocks[x][y][z]; 
-				if (block.type == BlockType::AIR) continue;//dont draw faces for air
-
-				generateBlockFaces(vertices, indices, block);//create each blocks faces
+	for (int y = 0; y < chunkSize; y++) {
+		for (int x = 0; x < chunkSize; x++) {
+			for (int z = 0; z < chunkSize; z++) {
+				Block& block = blocks[x][y][z];
+				if (block.type == BlockType::AIR) continue;
+				generateBlockFaces(verticesByType[block.type], indicesByType[block.type], block);
 			}
 		}
 	}
 
-	//create buffers
+	// Set up VAO/VBO/EBO for the entire chunk
 	glGenVertexArrays(1, &VAO);
 	glBindVertexArray(VAO);
 
 	glGenBuffers(1, &VBO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_DYNAMIC_DRAW); 
-
 	glGenBuffers(1, &EBO);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_DYNAMIC_DRAW); 
 
-	// Position
+	// Concatenate all vertices into one VBO, but track offsets
+	std::vector<float> allVertices;
+	std::vector<unsigned int> allIndices;
+	unsigned int vertexOffset = 0;
+	unsigned int indexOffset = 0;
+
+	for (auto& pair : verticesByType) {
+		BlockType type = pair.first;
+		auto& vertices = pair.second;
+		auto& indices = indicesByType[type];
+
+		baseIndicesByType[type] = indexOffset;
+
+		allVertices.insert(allVertices.end(), vertices.begin(), vertices.end());
+
+		for (unsigned int idx : indices) {
+			allIndices.push_back(idx + vertexOffset / 8); // 8 floats per vertex
+		}
+
+		vertexOffset += vertices.size();
+		indexOffset += indices.size();
+	}
+
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
+
+	// Vertex attributes
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+	glEnableVertexAttribArray(2);
 
-	// Color attribute
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); 
-	glEnableVertexAttribArray(1); 
-
-	// Texture coordinate attribute
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); 
-	glEnableVertexAttribArray(2); 
-
-	glBindVertexArray(0); // Unbind VAO}
-
-	
+	glBindVertexArray(0);
 }
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {

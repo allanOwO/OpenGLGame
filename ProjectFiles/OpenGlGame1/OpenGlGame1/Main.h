@@ -10,6 +10,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Chunk.h"
+#include <map>
 
 class Main
 {
@@ -41,6 +42,8 @@ private:
 	unsigned int EBO, VBO, VAO, texture;//element buffer, vertex buffer, vertext array
 
 	Shader* shader;
+
+	std::map<BlockType, GLuint> textureMap; 
 
 	// camera
 	bool firstMouse;//used to ignore the mouses 1st frame to stop a large jump
