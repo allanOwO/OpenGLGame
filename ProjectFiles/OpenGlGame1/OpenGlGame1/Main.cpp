@@ -367,6 +367,21 @@ void Main::getTextures() {
 
     // Store texture ID for "dirt" block
     textureMap[BlockType::STONE] = stoneTex;
+
+    data = stbi_load("../ResourceFiles/grass.jpg", &width, &height, &nrChannels, 0);
+    if (!data) {
+        std::cerr << "Failed to load grass texture!" << std::endl;
+        exit(-1);
+    }
+    GLuint grassTex;
+    glGenTextures(1, &grassTex);
+    glBindTexture(GL_TEXTURE_2D, grassTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(data);
+
+    // Store texture ID for "dirt" block
+    textureMap[BlockType::GRASS] = grassTex;
 }
 
 void Main::doFps() {

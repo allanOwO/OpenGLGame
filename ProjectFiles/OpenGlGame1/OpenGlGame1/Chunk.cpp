@@ -17,8 +17,10 @@ Chunk::Chunk(glm::vec3 position)
 				if (i < 10)
 					type = BlockType::STONE;
 
-				else
+				else if (i < chunkSize - 1)
 					type = BlockType::DIRT;
+				else
+					type = BlockType::GRASS;
 
 				blocks[j][i][k] = {type,glm::vec3(j,i,k)};//j,i,k = x,y,z
 			}
