@@ -3,15 +3,27 @@ out vec4 FragColor;
 
 in vec4 objectColour;
 in vec2 TexCoord;
+in vec3 FragPos;
+in vec3 Normal;
 
 uniform vec4 lightColour;
+uniform vec3 lightPos;// Light position in world space
 uniform sampler2D ourTexture;
 
 void main()
 {
+    //ambient
     float ambientStrength = 0.1;
     vec3 ambient = ambientStrength * lightColour.rgb;
-    vec3 baseColor = objectColour.rgb * texture(ourTexture, TexCoord).rgb;
-    vec3 result = baseColor * ambient;
+
+    //diffuse
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lightColour.rgb;
+
+    // Combine lighting with object color and texture
+    vec3 result = (ambient + diffuse) * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
+
     FragColor = vec4(result, 1.0);
 }

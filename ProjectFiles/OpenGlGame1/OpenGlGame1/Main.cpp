@@ -160,12 +160,14 @@ void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
     lightShader = new Shader("lightVertexShader.glsl","lightFragShader.glsl");
+
     shader->use();  
     modelLocation = glGetUniformLocation(shader->ID, "model");
     viewLocation = glGetUniformLocation(shader->ID, "view");
     projectionLocation = glGetUniformLocation(shader->ID, "projection");
     textureLocation = glGetUniformLocation(shader->ID, "texture1");
-    lightLocation = glGetUniformLocation(shader->ID, "lightColour");
+    lightColourLoc = glGetUniformLocation(shader->ID, "lightColour");
+    lightPosLoc = glGetUniformLocation(shader->ID, "lightPos"); // New
 
     lightShader->use();
     lightModelLocation = glGetUniformLocation(lightShader->ID, "model");
@@ -222,6 +224,27 @@ void Main::createCube() {
          -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f
     };
 
+    float normals[] = {
+        // Back face (0, 0, -1)
+        0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,
+        0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,
+        // Front face (0, 0, 1)
+        0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,
+        // Left face (-1, 0, 0)
+        -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
+        -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
+        // Right face (1, 0, 0)
+        1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+        // Bottom face (0, -1, 0)
+        0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,
+        0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,
+        // Top face (0, 1, 0)
+        0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f
+    };
+
     //create vertex array object
     glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);//bind VAO
@@ -244,6 +267,13 @@ void Main::createCube() {
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); 
     glEnableVertexAttribArray(2); 
 
+    //bind normals to cube
+    glGenBuffers(1, &normalsVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, normalsVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(normals), normals, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0); // Normal 
+    glEnableVertexAttribArray(3); 
 
     //unblund vao
     glBindVertexArray(0);
@@ -334,27 +364,32 @@ void Main::render() {
     lightModel = glm::translate(lightModel, glm::vec3(0, 20, 0)); 
     lightModel = glm::scale(lightModel, glm::vec3(0.2f));
     //pass view and projection matrices to shader
+    glUniformMatrix4fv(lightModelLocation, 1, GL_FALSE, glm::value_ptr(lightModel)); 
     glUniformMatrix4fv(lightViewLocation, 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(lightProjectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
-    glUniformMatrix4fv(lightModelLocation, 1, GL_FALSE, glm::value_ptr(lightModel)); 
-
+    //draw light cube  
     glBindVertexArray(lightVAO); 
     glDrawArrays(GL_TRIANGLES, 0, 36); 
     glBindVertexArray(0); 
 
-    //use normal shader
+    //use normal shader for cube + chunks
     shader->use(); 
+    // pass view and projection matrices to shader
+    glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
     
     //model matrice for rotating cube
     glm::mat4 cubeModel = glm::mat4(1.0f);
-    // Rotate the object
     cubeModel = glm::rotate(cubeModel, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f));
 
-    //pass view and projection matrices to shader
-    glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+    
     glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(cubeModel)); 
-    glUniform4f(lightLocation, 1.0f, 1.0f, 1.0f, 1.0f);//wh
+    glUniform4f(lightColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);//whiteLgiht
+    lightShader->setVec3("lightPos", mainLightPos);
+    //bind textures
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureMap[BlockType::DIRT]);
+    glUniform1i(textureLocation, 0); 
     //draw the rotating cube   
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);

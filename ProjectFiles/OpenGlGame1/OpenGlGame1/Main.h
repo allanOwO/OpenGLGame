@@ -35,8 +35,9 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightLocation;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightColourLoc,lightPosLoc;
 	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
+	glm::vec3 mainLightPos = glm::vec3(0,20,0);
 
 	int seed = -1;
 	void drawChunks();
@@ -45,7 +46,7 @@ private:
 	
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
-	unsigned int VBO, VAO, texture;//element buffer, vertex buffer, vertext array
+	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
 
 	unsigned int lightVBO, lightVAO;
 
