@@ -159,11 +159,19 @@ void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
 void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
-    shader->use();
+    lightShader = new Shader("lightVertexShader.glsl","lightFragShader.glsl");
+    shader->use();  
     modelLocation = glGetUniformLocation(shader->ID, "model");
     viewLocation = glGetUniformLocation(shader->ID, "view");
     projectionLocation = glGetUniformLocation(shader->ID, "projection");
     textureLocation = glGetUniformLocation(shader->ID, "texture1");
+    lightLocation = glGetUniformLocation(shader->ID, "lightColour");
+
+    lightShader->use();
+    lightModelLocation = glGetUniformLocation(lightShader->ID, "model");
+    lightViewLocation = glGetUniformLocation(lightShader->ID, "view");
+    lightProjectionLocation = glGetUniformLocation(lightShader->ID, "projection");
+
 }
 
 void Main::createCube() {
@@ -213,10 +221,6 @@ void Main::createCube() {
          -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
          -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f
     };
-    unsigned int indices[] = {  // note that we start from 0!
-        0, 1, 3,   // first triangle
-        1, 2, 3    // second triangle
-    };
 
     //create vertex array object
     glGenVertexArrays(1, &VAO);
@@ -246,40 +250,116 @@ void Main::createCube() {
 
 }
 
+void Main::createLight() {
+
+    float vertices[] = {
+        // positions   
+        // Back face
+        -0.5f, -0.5f, -0.5f,
+         0.5f,  0.5f, -0.5f,
+         0.5f, -0.5f, -0.5f,
+         0.5f,  0.5f, -0.5f,
+        -0.5f, -0.5f, -0.5f,
+        -0.5f,  0.5f, -0.5f, 
+        // Front face
+        -0.5f, -0.5f,  0.5f,
+         0.5f, -0.5f,  0.5f,
+         0.5f,  0.5f,  0.5f,
+         0.5f,  0.5f,  0.5f,  
+        -0.5f,  0.5f,  0.5f,   
+        -0.5f, -0.5f,  0.5f,  
+        // Left face
+        -0.5f,  0.5f,  0.5f,   
+        -0.5f,  0.5f, -0.5f,   
+        -0.5f, -0.5f, -0.5f,   
+        -0.5f, -0.5f, -0.5f,   
+        -0.5f, -0.5f,  0.5f,  
+        -0.5f,  0.5f,  0.5f, 
+        // Right face
+         0.5f,  0.5f,  0.5f,   
+         0.5f, -0.5f, -0.5f, 
+         0.5f,  0.5f, -0.5f,  
+         0.5f, -0.5f, -0.5f, 
+         0.5f,  0.5f,  0.5f,  
+         0.5f, -0.5f,  0.5f, 
+         // Bottom face
+         -0.5f, -0.5f, -0.5f,  
+          0.5f, -0.5f, -0.5f, 
+          0.5f, -0.5f,  0.5f,   
+          0.5f, -0.5f,  0.5f,  
+         -0.5f, -0.5f,  0.5f,
+         -0.5f, -0.5f, -0.5f,   
+         // Top face
+         -0.5f,  0.5f, -0.5f,  
+          0.5f,  0.5f,  0.5f,   
+          0.5f,  0.5f, -0.5f,  
+          0.5f,  0.5f,  0.5f,   
+         -0.5f,  0.5f, -0.5f, 
+         -0.5f,  0.5f,  0.5f
+    };
+    //create vertex array object
+    glGenVertexArrays(1, &lightVAO);
+    glBindVertexArray(lightVAO);//bind VAO
+
+
+    //create vertex buffer object
+    glGenBuffers(1, &lightVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, lightVBO);//basically make GL_ARRAY_BUFFER work as a reference to vbo
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);//copy data (vertices) into the buffers memory
+
+    // Set the position attribute (first 3 floats in each vertex)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    //unblund vao
+    glBindVertexArray(0);
+
+}
+
 void Main::render() {
 
     // set background & clear screen
     glClearColor(0.1, 0.4, 0.6, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-    
-
-    shader->use();
 
     //vie and projection matrices
     //lookat(position, target, up)
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
 
-    //pass view and projection matrices to shader
-    glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+    //use light shader for light
+    lightShader->use();
 
+    glm::mat4 lightModel = glm::mat4(1.0f); 
+    lightModel = glm::translate(lightModel, glm::vec3(0, 20, 0)); 
+    lightModel = glm::scale(lightModel, glm::vec3(0.2f));
+    //pass view and projection matrices to shader
+    glUniformMatrix4fv(lightViewLocation, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(lightProjectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+    glUniformMatrix4fv(lightModelLocation, 1, GL_FALSE, glm::value_ptr(lightModel)); 
+
+    glBindVertexArray(lightVAO); 
+    glDrawArrays(GL_TRIANGLES, 0, 36); 
+    glBindVertexArray(0); 
+
+    //use normal shader
+    shader->use(); 
     
     //model matrice for rotating cube
     glm::mat4 cubeModel = glm::mat4(1.0f);
     // Rotate the object
-    cubeModel = glm::rotate(cubeModel, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f)); 
+    cubeModel = glm::rotate(cubeModel, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f));
 
+    //pass view and projection matrices to shader
+    glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
     glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(cubeModel)); 
-
-    //draw the rotating cube
-    
+    glUniform4f(lightLocation, 1.0f, 1.0f, 1.0f, 1.0f);//wh
+    //draw the rotating cube   
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); // Unbind the EBO
-    
- 
+
     drawChunks();
 }
 
@@ -408,6 +488,7 @@ void Main::run() {
 
 
     createCube();
+    createLight();
 
     getTextures(); 
     addChunks();

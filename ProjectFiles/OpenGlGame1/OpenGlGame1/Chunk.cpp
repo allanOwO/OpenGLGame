@@ -212,3 +212,10 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 		return false; // Treat out-of-bounds as empty space
 	return blocks[x][y][z].type != BlockType::AIR;
 }
+
+void Chunk::setBlock(int x, int y, int z, BlockType type) {
+	if (x >= 0 && x < chunkSize && y >= 0 && y < chunkHeight && z >= 0 && z < chunkSize) {
+		blocks[x][y][z] = { type, glm::vec3(x, y, z) };
+		generateMesh(); // Regenerate the mesh to reflect the change
+	}
+}

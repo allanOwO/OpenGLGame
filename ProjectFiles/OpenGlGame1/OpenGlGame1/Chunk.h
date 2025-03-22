@@ -28,11 +28,9 @@ public:
 
 	Chunk(glm::vec3 position,int seed);//constructor
 	~Chunk();
-
 	// Delete copy constructor and copy assignment operator
 	Chunk(const Chunk&) = delete; 
 	Chunk& operator=(const Chunk&) = delete; 
-
 	// Define move constructor
 	Chunk(Chunk&& other) noexcept
 		: chunkPosition(other.chunkPosition),
@@ -49,7 +47,6 @@ public:
 		other.VBO = 0;
 		other.EBO = 0;
 	} 
-	
 	// Define move assignment operator
 	Chunk& operator=(Chunk&& other) noexcept
 	{
@@ -77,8 +74,8 @@ public:
 		return *this;
 	} 
 
-
 	void generateMesh();//creates chunk mesh
+	void setBlock(int x, int y, int z, BlockType type); 
 
 	unsigned int VBO, VAO, EBO;
 

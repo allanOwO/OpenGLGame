@@ -27,6 +27,7 @@ private:
 	void processInput(GLFWwindow* window); // Process user input
 	void createShaders();
 	void createCube();
+	void createLight();
 	void render();
 	void getTextures();
 	void doFps();
@@ -34,7 +35,8 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightLocation;
+	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
 
 	int seed = -1;
 	void drawChunks();
@@ -43,9 +45,12 @@ private:
 	
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
-	unsigned int EBO, VBO, VAO, texture;//element buffer, vertex buffer, vertext array
+	unsigned int VBO, VAO, texture;//element buffer, vertex buffer, vertext array
+
+	unsigned int lightVBO, lightVAO;
 
 	Shader* shader;
+	Shader* lightShader;
 
 	std::map<BlockType, GLuint> textureMap; 
 
