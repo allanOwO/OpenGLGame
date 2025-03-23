@@ -89,7 +89,7 @@ void Chunk::generateMesh() {
 		allVertices.insert(allVertices.end(), vertices.begin(), vertices.end());
 
 		for (unsigned int idx : indices) {
-			allIndices.push_back(idx + vertexOffset / 8); // 8 floats per vertex
+			allIndices.push_back(idx + vertexOffset / 11); // 11 floats per vertex
 		}
 
 		vertexOffset += vertices.size();
@@ -104,12 +104,14 @@ void Chunk::generateMesh() {
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
 
 	// Vertex attributes
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0); // Position 
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
-	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float))); // Color
+	glEnableVertexAttribArray(1); 
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float))); // Texture
+	glEnableVertexAttribArray(2); 
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float))); // Normal
+	glEnableVertexAttribArray(3); 
 
 	glBindVertexArray(0);
 }
@@ -139,6 +141,16 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 		{1.0f, 1.0f}, {0.0f, 1.0f}
 	};
 
+	// Normals per face
+	glm::vec3 normals[6] = {
+		{0.0f, 0.0f, -1.0f}, // Front
+		{0.0f, 0.0f, 1.0f},  // Back
+		{-1.0f, 0.0f, 0.0f}, // Left
+		{1.0f, 0.0f, 0.0f},  // Right
+		{0.0f, 1.0f, 0.0f},  // Top
+		{0.0f, -1.0f, 0.0f}  // Bottom
+	}; 
+
 	// Face definitions (6 faces, each using 4 unique vertices)
 	int faces[6][4] = {
 	{3, 2, 1, 0}, // Front
@@ -149,7 +161,7 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 	{0, 1, 5, 4}  // Bottom
 	};
 
-	unsigned int baseIndex = vertices.size() / 8;
+	unsigned int baseIndex = vertices.size() / 11;
 
 	// Add vertices per face
 	for (int f = 0; f < 6; f++) {
@@ -190,6 +202,9 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 			vertices.push_back(color.b);
 			vertices.push_back(texCoords[i][0]);
 			vertices.push_back(texCoords[i][1]);
+			vertices.push_back(normals[f].x); // Add normal
+			vertices.push_back(normals[f].y);
+			vertices.push_back(normals[f].z); 
 		} 
 
 		// Add two triangles per face

@@ -8,6 +8,7 @@ in vec3 Normal;
 
 uniform vec4 lightColour;
 uniform vec3 lightPos;// Light position in world space
+uniform vec3 sunDirection;
 uniform sampler2D ourTexture;
 
 void main()
@@ -18,7 +19,7 @@ void main()
 
     //diffuse
     vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
+    vec3 lightDir = normalize(-sunDirection);
     float diff = max(dot(norm, lightDir), 0.0);
     vec3 diffuse = diff * lightColour.rgb;
 

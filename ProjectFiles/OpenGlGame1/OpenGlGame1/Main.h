@@ -35,9 +35,10 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightColourLoc,lightPosLoc;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightColourLoc,lightPosLoc, sunDirLoc;
 	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
-	glm::vec3 mainLightPos = glm::vec3(0,20,0);
+	glm::vec3 mainLightPos = glm::vec3(0,20,10);
+	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light
 
 	int seed = -1;
 	void drawChunks();

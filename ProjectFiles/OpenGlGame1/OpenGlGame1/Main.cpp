@@ -168,6 +168,7 @@ void Main::createShaders() {
     textureLocation = glGetUniformLocation(shader->ID, "texture1");
     lightColourLoc = glGetUniformLocation(shader->ID, "lightColour");
     lightPosLoc = glGetUniformLocation(shader->ID, "lightPos"); // New
+    sunDirLoc = glGetUniformLocation(shader->ID, "sunDirection");
 
     lightShader->use();
     lightModelLocation = glGetUniformLocation(lightShader->ID, "model");
@@ -361,7 +362,7 @@ void Main::render() {
     lightShader->use();
 
     glm::mat4 lightModel = glm::mat4(1.0f); 
-    lightModel = glm::translate(lightModel, glm::vec3(0, 20, 0)); 
+    lightModel = glm::translate(lightModel,mainLightPos); 
     lightModel = glm::scale(lightModel, glm::vec3(0.2f));
     //pass view and projection matrices to shader
     glUniformMatrix4fv(lightModelLocation, 1, GL_FALSE, glm::value_ptr(lightModel)); 
@@ -385,7 +386,8 @@ void Main::render() {
     
     glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(cubeModel)); 
     glUniform4f(lightColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);//whiteLgiht
-    lightShader->setVec3("lightPos", mainLightPos);
+    
+    glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection)); // Pass direction of sun
     //bind textures
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureMap[BlockType::DIRT]);
