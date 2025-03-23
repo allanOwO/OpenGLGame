@@ -116,6 +116,7 @@ void Chunk::generateMesh() {
 	glBindVertexArray(0);
 }
 
+
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {
 
 	//block position in chunk local space

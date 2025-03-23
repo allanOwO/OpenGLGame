@@ -103,7 +103,6 @@ void Main::processInput(GLFWwindow* window)
     float currentFrame = glfwGetTime();
     deltaTime = currentFrame - lastFrame;
     lastFrame = currentFrame;
-
     float camSpeed = camSpeedBase * deltaTime;
     
     //fw & bw move
@@ -116,6 +115,24 @@ void Main::processInput(GLFWwindow* window)
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
+
+    //buiilding
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+        static double lastBreakTime = 0.0;
+        double currentTime = glfwGetTime();
+        if (currentTime - lastBreakTime > 0.2) { // 0.2s cooldown
+            breakBlock();
+            lastBreakTime = currentTime;
+        }
+    }
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+        static double lastPlaceTime = 0.0;
+        double currentTime = glfwGetTime();
+        if (currentTime - lastPlaceTime > 0.2) { // 0.2s cooldown
+            placeBlock();
+            lastPlaceTime = currentTime;
+        }
+    } 
 }
 
 //handles looking
@@ -373,6 +390,14 @@ void Main::render() {
     glDrawArrays(GL_TRIANGLES, 0, 36); 
     glBindVertexArray(0); 
 
+
+    // Rotate sun direction based on time
+    float time = glfwGetTime();
+    float angle = time * 3.0f; // Adjust speed (0.1f = slow rotation, increase for faster)
+    glm::vec3 baseSunDirection = glm::vec3(0.0f, -1.0f, -1.0f); // Starting direction
+    sunDirection = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(1.0f, 0.0f, 0.0f))) * baseSunDirection;
+    sunDirection = glm::normalize(sunDirection); // Ensure it stays a unit vector 
+
     //use normal shader for cube + chunks
     shader->use(); 
     // pass view and projection matrices to shader
@@ -514,6 +539,110 @@ void Main::doFps() {
         glfwSetWindowTitle(window, title.c_str());
     }
 }
+ 
+
+void Main::raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit) {
+    hit = false;
+    glm::vec3 rayOrigin = cameraPos;
+    glm::vec3 rayDir = glm::normalize(cameraFront);
+    float t = 0.0f;
+    float step = 0.1f;
+
+    for (t = 0.0f; t < reachDistance; t += step) {
+        glm::vec3 currentPos = rayOrigin + rayDir * t;
+        int chunkX = static_cast<int>(floor(currentPos.x / Chunk::chunkSize));
+        int chunkZ = static_cast<int>(floor(currentPos.z / Chunk::chunkSize));
+
+        // Find the chunk and compute local coordinates
+        for (auto& chunk : chunks) {
+            glm::vec3 chunkPos = chunk.chunkPosition;
+            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
+                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
+                // Adjust Y relative to chunk's base position
+                int localX = static_cast<int>(floor(currentPos.x)) % Chunk::chunkSize;
+                int localZ = static_cast<int>(floor(currentPos.z)) % Chunk::chunkSize;
+                int localY = static_cast<int>(floor(currentPos.y - chunkPos.y)); // Offset by chunk Y
+
+                if (localX < 0) localX += Chunk::chunkSize;
+                if (localZ < 0) localZ += Chunk::chunkSize;
+
+                if (localY >= 0 && localY < Chunk::chunkHeight) {
+                    Block& block = chunk.blocks[localX][localY][localZ];
+                    if (block.type != BlockType::AIR) {
+                        hitPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
+                        glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
+                        glm::vec3 diff = hitPos - prevPos;
+                        normal = -glm::normalize(glm::vec3(
+                            abs(diff.x) > abs(diff.y) && abs(diff.x) > abs(diff.z) ? (diff.x > 0 ? 1 : -1) : 0,
+                            abs(diff.y) > abs(diff.x) && abs(diff.y) > abs(diff.z) ? (diff.y > 0 ? 1 : -1) : 0,
+                            abs(diff.z) > abs(diff.x) && abs(diff.z) > abs(diff.y) ? (diff.z > 0 ? 1 : -1) : 0
+                        ));
+                        hit = true;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void Main::placeBlock() {
+    glm::vec3 hitPos, normal;
+    bool hit;
+    raycastBlock(hitPos, normal, hit);
+    if (hit) {
+        glm::vec3 placePos = hitPos + normal;
+        int chunkX = static_cast<int>(floor(placePos.x / Chunk::chunkSize));
+        int chunkZ = static_cast<int>(floor(placePos.z / Chunk::chunkSize));
+
+        for (auto& chunk : chunks) {
+            glm::vec3 chunkPos = chunk.chunkPosition;
+            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
+                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
+                int localX = static_cast<int>(placePos.x) % Chunk::chunkSize;
+                int localY = static_cast<int>(placePos.y - chunkPos.y); // Adjust for chunk Y
+                int localZ = static_cast<int>(placePos.z) % Chunk::chunkSize;
+
+                if (localX < 0) localX += Chunk::chunkSize;
+                if (localZ < 0) localZ += Chunk::chunkSize;
+
+                if (localY >= 0 && localY < Chunk::chunkHeight) {
+                    chunk.setBlock(localX, localY, localZ, BlockType::STONE);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+void Main::breakBlock() {
+    glm::vec3 hitPos, normal;
+    bool hit;
+    raycastBlock(hitPos, normal, hit);
+    if (hit) {
+        int chunkX = static_cast<int>(floor(hitPos.x / Chunk::chunkSize));
+        int chunkZ = static_cast<int>(floor(hitPos.z / Chunk::chunkSize));
+
+        for (auto& chunk : chunks) {
+            glm::vec3 chunkPos = chunk.chunkPosition;
+            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
+                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
+                int localX = static_cast<int>(hitPos.x) % Chunk::chunkSize;
+                int localY = static_cast<int>(hitPos.y - chunkPos.y); // Adjust for chunk Y
+                int localZ = static_cast<int>(hitPos.z) % Chunk::chunkSize;
+
+                if (localX < 0) localX += Chunk::chunkSize;
+                if (localZ < 0) localZ += Chunk::chunkSize;
+
+                if (localY >= 0 && localY < Chunk::chunkHeight) {
+                    chunk.setBlock(localX, localY, localZ, BlockType::AIR);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 
 void Main::run() {
 
@@ -537,6 +666,8 @@ void Main::run() {
     glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
+    // Enable V-Sync to cap FPS to monitor refresh rate
+    glfwSwapInterval(1); // 1 = V-Sync on, 0 = V-Sync off 
 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode
 

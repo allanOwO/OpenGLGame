@@ -84,10 +84,11 @@ public:
 	std::map<BlockType, unsigned int> baseIndicesByType; // Track base index per type 
 	glm::vec3 chunkPosition;
 
+	std::vector<std::vector<std::vector<Block>>> blocks;//list of all blocks in chunk 
 
 private:
 	
-	std::vector<std::vector<std::vector<Block>>> blocks;//list of all blocks in chunk
+	
 
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block); 
 	bool isBlockSolid(int x, int y, int z);

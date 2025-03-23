@@ -14,13 +14,13 @@ uniform sampler2D ourTexture;
 void main()
 {
     //ambient
-    float ambientStrength = 0.1;
+    float ambientStrength = 0.3;
     vec3 ambient = ambientStrength * lightColour.rgb;
 
     //diffuse
     vec3 norm = normalize(Normal);
     vec3 lightDir = normalize(-sunDirection);
-    float diff = max(dot(norm, lightDir), 0.0);
+    float diff = (dot(norm, lightDir) + 1.0) * 0.5; // Range [0, 1] instead of sharp cutoff
     vec3 diffuse = diff * lightColour.rgb;
 
     // Combine lighting with object color and texture

@@ -83,5 +83,11 @@ private:
 	float lastFPSTime = 0.0f; // Time of the last FPS update
 	int frameCount = 0;        // Number of frames since last update
 	float fps = 0.0f;          // Current FPS value
+
+	//building
+	void raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit); // Find block player is looking at
+	void placeBlock(); // Place a block
+	void breakBlock(); // Break a block
+	float reachDistance = 5.0f; // Max distance player can build
 };
 
