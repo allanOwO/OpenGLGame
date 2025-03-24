@@ -491,7 +491,6 @@ void Main::addChunks() {
             chunkCount++;
         }
     }
-    std::cout << "chunk count: " << chunkCount;
 }
 
 void Main::drawChunks() {
@@ -614,18 +613,15 @@ void Main::raycastBlock() {
 
                 if (localY >= 0 && localY < Chunk::chunkHeight) {
                     Block& block = chunk.blocks[localX][localY][localZ];
+                    //when hit block
                     if (block.type != BlockType::AIR) {
                         highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
                         hasHighlightedBlock = true;
                         
                         // Compute normal based on ray direction and hit position
                         glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
-                        glm::vec3 diff = highlightedBlockPos - prevPos;
-                        highlightedNormal = -glm::normalize(glm::vec3(
-                            abs(diff.x) > abs(diff.y) && abs(diff.x) > abs(diff.z) ? (diff.x > 0 ? 1 : -1) : 0,
-                            abs(diff.y) > abs(diff.x) && abs(diff.y) > abs(diff.z) ? (diff.y > 0 ? 1 : -1) : 0,
-                            abs(diff.z) > abs(diff.x) && abs(diff.z) > abs(diff.y) ? (diff.z > 0 ? 1 : -1) : 0
-                        ));
+                        prevBlock = glm::vec3(floor(prevPos.x), floor(prevPos.y), floor(prevPos.z));
+                        
                         return;
                     }
                 }
@@ -636,12 +632,9 @@ void Main::raycastBlock() {
 
 void Main::placeBlock() {
     if (hasHighlightedBlock) {
-        glm::vec3 placePos = highlightedBlockPos + highlightedNormal; // Place block on the face indicated by the normal
+        glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal
         int chunkX = static_cast<int>(floor(placePos.x / Chunk::chunkSize));
         int chunkZ = static_cast<int>(floor(placePos.z / Chunk::chunkSize));
-
-        std::cout << "Trying to place at: (" << placePos.x << ", " << placePos.y << ", " << placePos.z << ")\n";
-        std::cout << "Target chunk: (" << chunkX << ", " << chunkZ << ")\n";
 
         for (auto& chunk : chunks) {
             glm::vec3 chunkPos = chunk.chunkPosition;
@@ -649,12 +642,10 @@ void Main::placeBlock() {
             int chunkPosZ = static_cast<int>(chunkPos.z / Chunk::chunkSize);
 
             if (chunkPosX == chunkX && chunkPosZ == chunkZ) {
-                std::cout << "Found chunk at: (" << chunkPos.x << ", " << chunkPos.z << ")\n";
                 // Compute local coordinates relative to the chunk's position
                 int localX = static_cast<int>(placePos.x - chunkPos.x);
                 int localY = static_cast<int>(placePos.y - chunkPos.y);
                 int localZ = static_cast<int>(placePos.z - chunkPos.z);
-                std::cout << "Local coords: (" << localX << ", " << localY << ", " << localZ << ")\n";
 
                 // Ensure local coordinates are within chunk bounds
                 if (localX >= 0 && localX < Chunk::chunkSize &&
@@ -663,7 +654,6 @@ void Main::placeBlock() {
                     if (chunk.blocks[localX][localY][localZ].type == BlockType::AIR) {
                         chunk.setBlock(localX, localY, localZ, BlockType::STONE);
                         ///chunk.generateMesh(); // Regenerate mesh after placing
-                        std::cout << "Placed block at local: (" << localX << ", " << localY << ", " << localZ << ")\n";
                     }
                     return;
                 }

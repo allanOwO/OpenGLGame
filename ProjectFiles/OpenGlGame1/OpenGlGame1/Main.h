@@ -38,17 +38,13 @@ private:
 	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightColourLoc,lightPosLoc, sunDirLoc;
 	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
 	glm::vec3 mainLightPos = glm::vec3(0,20,10);
-	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light
-
-	int seed = -1;
-	void drawChunks();
+	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
 
 	GLFWwindow* window; // Window pointer
 	
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
-
 	unsigned int lightVBO, lightVAO;
 
 	Shader* shader;
@@ -77,7 +73,9 @@ private:
 	//chunk stuff
 	std::vector<Chunk> chunks;
 	std::vector<glm::mat4> chunkModels;//array of chunk models
-	void addChunks();
+	void addChunks();	
+	void drawChunks();
+	int seed = -1;
 
 	//fps tracking
 	float lastFPSTime = 0.0f; // Time of the last FPS update
@@ -91,7 +89,7 @@ private:
 	float reachDistance = 5.0f; // Max distance player can build
 	glm::vec3 highlightedBlockPos; // Position of the block to highlight
 	bool hasHighlightedBlock;      // True if a block is in range and highlighted
-	glm::vec3 highlightedNormal;//block face thats being faced
+	glm::vec3 prevBlock;
 	void createHighlight();
 	GLuint highlightVAO, highlightVBO; 
 };
