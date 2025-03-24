@@ -12,6 +12,14 @@
 #include "Chunk.h"
 #include <map>
 
+//players bounding box(collsisions)
+struct AABB {
+	glm::vec3 min;
+	glm::vec3 max;
+};
+
+
+
 class Main
 {
 public:
@@ -35,13 +43,13 @@ private:
 	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation,lightColourLoc,lightPosLoc, sunDirLoc;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc;
 	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
-	glm::vec3 mainLightPos = glm::vec3(0,20,10);
+	glm::vec3 mainLightPos = glm::vec3(0, 20, 10);
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
 
 	GLFWwindow* window; // Window pointer
-	
+
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
@@ -50,11 +58,11 @@ private:
 	Shader* shader;
 	Shader* lightShader;
 
-	std::map<BlockType, GLuint> textureMap; 
+	std::map<BlockType, GLuint> textureMap;
 
 	// camera
 	bool firstMouse;//used to ignore the mouses 1st frame to stop a large jump
-	glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
+	glm::vec3 cameraPos = glm::vec3(0.0f, 100.0f, 3.0f);
 	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
@@ -73,7 +81,7 @@ private:
 	//chunk stuff
 	std::vector<Chunk> chunks;
 	std::vector<glm::mat4> chunkModels;//array of chunk models
-	void addChunks();	
+	void addChunks();
 	void drawChunks();
 	int seed = -1;
 
@@ -91,6 +99,13 @@ private:
 	bool hasHighlightedBlock;      // True if a block is in range and highlighted
 	glm::vec3 prevBlock;
 	void createHighlight();
-	GLuint highlightVAO, highlightVBO; 
+	GLuint highlightVAO, highlightVBO;
+
+	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
+	float gravity = -9.8f; // Gravity strength (tune this) 
+	AABB playerAABB = { glm::vec3(-0.3f, -1.0f, -0.3f), glm::vec3(0.3f, 1.0f, 0.3f) }; // Example size
+	bool intersects(const AABB& a, const AABB& b);
+	bool grounded;
 };
+	
 
