@@ -85,9 +85,14 @@ private:
 	float fps = 0.0f;          // Current FPS value
 
 	//building
-	void raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit); // Find block player is looking at
+	void raycastBlock(); // Find block player is looking at
 	void placeBlock(); // Place a block
 	void breakBlock(); // Break a block
 	float reachDistance = 5.0f; // Max distance player can build
+	glm::vec3 highlightedBlockPos; // Position of the block to highlight
+	bool hasHighlightedBlock;      // True if a block is in range and highlighted
+	glm::vec3 highlightedNormal;//block face thats being faced
+	void createHighlight();
+	GLuint highlightVAO, highlightVBO; 
 };
 

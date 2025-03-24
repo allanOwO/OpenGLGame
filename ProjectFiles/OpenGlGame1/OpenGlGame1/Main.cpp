@@ -364,6 +364,37 @@ void Main::createLight() {
 
 }
 
+void Main::createHighlight() {
+    float vertices[] = {
+        -0.51f, -0.51f, -0.51f,  0.51f, -0.51f, -0.51f,
+         0.51f,  0.51f, -0.51f, -0.51f,  0.51f, -0.51f,
+        -0.51f, -0.51f,  0.51f,  0.51f, -0.51f,  0.51f,
+         0.51f,  0.51f,  0.51f, -0.51f,  0.51f,  0.51f
+    };
+    unsigned int indices[] = {
+        0, 1, 1, 2, 2, 3, 3, 0, // Bottom face
+        4, 5, 5, 6, 6, 7, 7, 4, // Top face
+        0, 4, 1, 5, 2, 6, 3, 7  // Sides
+    };
+
+    glGenVertexArrays(1, &highlightVAO);
+    glGenBuffers(1, &highlightVBO);
+    GLuint EBO;
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(highlightVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, highlightVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
+}
+
 void Main::render() {
 
     // set background & clear screen
@@ -393,7 +424,7 @@ void Main::render() {
 
     // Rotate sun direction based on time
     float time = glfwGetTime();
-    float angle = time * 3.0f; // Adjust speed (0.1f = slow rotation, increase for faster)
+    float angle = time * 0.5f; // Adjust speed (0.1f = slow rotation, increase for faster)
     glm::vec3 baseSunDirection = glm::vec3(0.0f, -1.0f, -1.0f); // Starting direction
     sunDirection = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(1.0f, 0.0f, 0.0f))) * baseSunDirection;
     sunDirection = glm::normalize(sunDirection); // Ensure it stays a unit vector 
@@ -423,6 +454,21 @@ void Main::render() {
     glBindVertexArray(0);
 
     drawChunks();
+
+    raycastBlock();//used to find currently faced blocl
+    // Render highlight if a block is in range
+    if (hasHighlightedBlock) {
+        shader->use();
+        glm::mat4 highlightModel = glm::mat4(1.0f);
+        // Center the highlight by adding (0.5, 0.5, 0.5) to the block position
+        highlightModel = glm::translate(highlightModel, highlightedBlockPos + glm::vec3(0.5f, 0.5f, 0.5f));
+        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(highlightModel));
+        glUniform4f(lightColourLoc, 1.0f, 1.0f, 0.0f, 1.0f); // Yellow highlight
+
+        glBindVertexArray(highlightVAO);
+        glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0); // 24 indices for wireframe
+        glBindVertexArray(0);
+    }
 }
 
 void Main::addChunks() {
@@ -541,8 +587,8 @@ void Main::doFps() {
 }
  
 
-void Main::raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit) {
-    hit = false;
+void Main::raycastBlock() {
+    hasHighlightedBlock = false;
     glm::vec3 rayOrigin = cameraPos;
     glm::vec3 rayDir = glm::normalize(cameraFront);
     float t = 0.0f;
@@ -569,15 +615,17 @@ void Main::raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit) {
                 if (localY >= 0 && localY < Chunk::chunkHeight) {
                     Block& block = chunk.blocks[localX][localY][localZ];
                     if (block.type != BlockType::AIR) {
-                        hitPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
+                        highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
+                        hasHighlightedBlock = true;
+                        
+                        // Compute normal based on ray direction and hit position
                         glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
-                        glm::vec3 diff = hitPos - prevPos;
-                        normal = -glm::normalize(glm::vec3(
+                        glm::vec3 diff = highlightedBlockPos - prevPos;
+                        highlightedNormal = -glm::normalize(glm::vec3(
                             abs(diff.x) > abs(diff.y) && abs(diff.x) > abs(diff.z) ? (diff.x > 0 ? 1 : -1) : 0,
                             abs(diff.y) > abs(diff.x) && abs(diff.y) > abs(diff.z) ? (diff.y > 0 ? 1 : -1) : 0,
                             abs(diff.z) > abs(diff.x) && abs(diff.z) > abs(diff.y) ? (diff.z > 0 ? 1 : -1) : 0
                         ));
-                        hit = true;
                         return;
                     }
                 }
@@ -587,27 +635,36 @@ void Main::raycastBlock(glm::vec3& hitPos, glm::vec3& normal, bool& hit) {
 }
 
 void Main::placeBlock() {
-    glm::vec3 hitPos, normal;
-    bool hit;
-    raycastBlock(hitPos, normal, hit);
-    if (hit) {
-        glm::vec3 placePos = hitPos + normal;
+    if (hasHighlightedBlock) {
+        glm::vec3 placePos = highlightedBlockPos + highlightedNormal; // Place block on the face indicated by the normal
         int chunkX = static_cast<int>(floor(placePos.x / Chunk::chunkSize));
         int chunkZ = static_cast<int>(floor(placePos.z / Chunk::chunkSize));
 
+        std::cout << "Trying to place at: (" << placePos.x << ", " << placePos.y << ", " << placePos.z << ")\n";
+        std::cout << "Target chunk: (" << chunkX << ", " << chunkZ << ")\n";
+
         for (auto& chunk : chunks) {
             glm::vec3 chunkPos = chunk.chunkPosition;
-            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
-                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
-                int localX = static_cast<int>(placePos.x) % Chunk::chunkSize;
-                int localY = static_cast<int>(placePos.y - chunkPos.y); // Adjust for chunk Y
-                int localZ = static_cast<int>(placePos.z) % Chunk::chunkSize;
+            int chunkPosX = static_cast<int>(chunkPos.x / Chunk::chunkSize);
+            int chunkPosZ = static_cast<int>(chunkPos.z / Chunk::chunkSize);
 
-                if (localX < 0) localX += Chunk::chunkSize;
-                if (localZ < 0) localZ += Chunk::chunkSize;
+            if (chunkPosX == chunkX && chunkPosZ == chunkZ) {
+                std::cout << "Found chunk at: (" << chunkPos.x << ", " << chunkPos.z << ")\n";
+                // Compute local coordinates relative to the chunk's position
+                int localX = static_cast<int>(placePos.x - chunkPos.x);
+                int localY = static_cast<int>(placePos.y - chunkPos.y);
+                int localZ = static_cast<int>(placePos.z - chunkPos.z);
+                std::cout << "Local coords: (" << localX << ", " << localY << ", " << localZ << ")\n";
 
-                if (localY >= 0 && localY < Chunk::chunkHeight) {
-                    chunk.setBlock(localX, localY, localZ, BlockType::STONE);
+                // Ensure local coordinates are within chunk bounds
+                if (localX >= 0 && localX < Chunk::chunkSize &&
+                    localY >= 0 && localY < Chunk::chunkHeight &&
+                    localZ >= 0 && localZ < Chunk::chunkSize) {
+                    if (chunk.blocks[localX][localY][localZ].type == BlockType::AIR) {
+                        chunk.setBlock(localX, localY, localZ, BlockType::STONE);
+                        ///chunk.generateMesh(); // Regenerate mesh after placing
+                        std::cout << "Placed block at local: (" << localX << ", " << localY << ", " << localZ << ")\n";
+                    }
                     return;
                 }
             }
@@ -615,27 +672,25 @@ void Main::placeBlock() {
     }
 }
 
-void Main::breakBlock() {
-    glm::vec3 hitPos, normal;
-    bool hit;
-    raycastBlock(hitPos, normal, hit);
-    if (hit) {
-        int chunkX = static_cast<int>(floor(hitPos.x / Chunk::chunkSize));
-        int chunkZ = static_cast<int>(floor(hitPos.z / Chunk::chunkSize));
+void Main::breakBlock() { 
+    if (hasHighlightedBlock) {
+        int chunkX = static_cast<int>(floor(highlightedBlockPos.x / Chunk::chunkSize));
+        int chunkZ = static_cast<int>(floor(highlightedBlockPos.z / Chunk::chunkSize));
 
         for (auto& chunk : chunks) {
             glm::vec3 chunkPos = chunk.chunkPosition;
             if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
                 static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
-                int localX = static_cast<int>(hitPos.x) % Chunk::chunkSize;
-                int localY = static_cast<int>(hitPos.y - chunkPos.y); // Adjust for chunk Y
-                int localZ = static_cast<int>(hitPos.z) % Chunk::chunkSize;
+                int localX = static_cast<int>(highlightedBlockPos.x) % Chunk::chunkSize;
+                int localY = static_cast<int>(highlightedBlockPos.y - chunkPos.y);
+                int localZ = static_cast<int>(highlightedBlockPos.z) % Chunk::chunkSize;
 
                 if (localX < 0) localX += Chunk::chunkSize;
                 if (localZ < 0) localZ += Chunk::chunkSize;
 
                 if (localY >= 0 && localY < Chunk::chunkHeight) {
                     chunk.setBlock(localX, localY, localZ, BlockType::AIR);
+                   // chunk.generateMesh(); // Regenerate mesh after breaking
                     return;
                 }
             }
@@ -660,6 +715,7 @@ void Main::run() {
     addChunks();
 
     createShaders();
+    createHighlight();
 
 
     glEnable(GL_CULL_FACE);   // Enable face culling 
