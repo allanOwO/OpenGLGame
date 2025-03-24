@@ -12,12 +12,7 @@
 #include "Chunk.h"
 #include <map>
 
-//players bounding box(collsisions)
-struct AABB {
-	glm::vec3 min;
-	glm::vec3 max;
-};
-
+#include "Player.h"
 
 
 class Main
@@ -32,15 +27,13 @@ public:
 private:
 
 	void init(); // Initialize GLFW, GLAD, etc.
-	void processInput(GLFWwindow* window); // Process user input
 	void createShaders();
 	void createCube();
 	void createLight();
 	void render();
 	void getTextures();
 	void doFps();
-
-	void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+	void processInput(GLFWwindow* window);
 
 	std::string loadShader(const char* filepath);
 	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc;
@@ -50,33 +43,15 @@ private:
 
 	GLFWwindow* window; // Window pointer
 
+	std::unique_ptr<Player> player;  // Use smart pointer for automatic cleanup
+
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
 	unsigned int lightVBO, lightVAO;
-
 	Shader* shader;
 	Shader* lightShader;
-
 	std::map<BlockType, GLuint> textureMap;
-
-	// camera
-	bool firstMouse;//used to ignore the mouses 1st frame to stop a large jump
-	glm::vec3 cameraPos = glm::vec3(0.0f, 100.0f, 3.0f);
-	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
-	glm::vec3 lookDirection;
-	float yaw = -90.0f;//offest at beginign to allign to -z
-	float pitch = 0.0f;
-
-	const float camSpeedBase = 10.0f;
-
-	float deltaTime = 0.0f;	// Time between current frame and last frame
-	float lastFrame = 0.0f; // Time of last frame
-
-	//mouse movement
-	float lastX = 400, lastY = 300;
 
 	//chunk stuff
 	std::vector<Chunk> chunks;
@@ -85,10 +60,13 @@ private:
 	void drawChunks();
 	int seed = -1;
 
-	//fps tracking
+	//fps tracking & timing
 	float lastFPSTime = 0.0f; // Time of the last FPS update
 	int frameCount = 0;        // Number of frames since last update
 	float fps = 0.0f;          // Current FPS value
+	float deltaTime = 0.0f;	// Time between current frame and last frame
+	float lastFrame = 0.0f; // Time of last frame
+
 
 	//building
 	void raycastBlock(); // Find block player is looking at
@@ -101,11 +79,8 @@ private:
 	void createHighlight();
 	GLuint highlightVAO, highlightVBO;
 
-	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
-	float gravity = -9.8f; // Gravity strength (tune this) 
-	AABB playerAABB = { glm::vec3(-0.3f, -1.0f, -0.3f), glm::vec3(0.3f, 1.0f, 0.3f) }; // Example size
-	bool intersects(const AABB& a, const AABB& b);
-	bool grounded;
+	
+
 };
 	
 

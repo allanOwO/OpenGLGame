@@ -8,12 +8,16 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
 #include<random>
+#include<memory>
 
 
 
-Main::Main() : window(nullptr),width(1280),height(720){
+Main::Main() : window(nullptr),width(1280),height(720),player(nullptr){
 
     init();
+  
+
+    player = std::make_unique<Player>(window);  // Use smart pointer for automatic cleanup;//give window to player
 }
 
 Main::~Main() {
@@ -74,129 +78,22 @@ void Main::init() {
         exit(-1);
     }
 
-    //set the pointer
-    glfwSetWindowUserPointer(window, this);
-
     // Set framebuffer size callback  
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    //lock mouse to scrreen
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); 
-
-    //using a lambda
-    glfwSetCursorPosCallback(window, [](GLFWwindow* window, double xpos, double ypos) {
-        // Retrieve the instance pointer from the user pointer.
-        Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
-        if (mainInstance) {
-            mainInstance->mouse_callback(window, xpos, ypos);
-        } 
-    }); 
+    //some opengl settings
+    glEnable(GL_CULL_FACE);   // Enable face culling 
+    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
+    glEnable(GL_DEPTH_TEST); 
+    glfwSwapInterval(1);// 1 = V-Sync on, 0 = V-Sync off 
+    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 }
 
 void Main::processInput(GLFWwindow* window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)//check for esc pressed
         glfwSetWindowShouldClose(window, true);
-
-
-    //cam movement
-    float currentFrame = glfwGetTime();
-    deltaTime = currentFrame - lastFrame;
-    lastFrame = currentFrame;
-    float camSpeed = camSpeedBase * deltaTime;
-
-    // Apply gravity and movemnt
-    velocity.y += gravity * deltaTime; // Accelerate downward
-    
-    
-    //WASD MOVEMENT
-    glm::vec3 moveDir(0.0f);
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        moveDir += camSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        moveDir -= camSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        moveDir += glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        moveDir -= glm::normalize(glm::cross(cameraFront, cameraUp)) * camSpeed;
-
-    if (glm::length(moveDir) > 0.0f) {
-        moveDir = glm::normalize(moveDir);
-        velocity.x = moveDir.x * camSpeedBase;
-        velocity.z = moveDir.z * camSpeedBase;
-    }
-    else {
-        velocity.x *= 0.9f; // Friction to slow down
-        velocity.z *= 0.9f;
-    } 
-    //proposed new pos
-    glm::vec3 newPos = cameraPos + velocity * deltaTime; 
-    
-    // Collision detection
-    AABB playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
-    bool collided = false;
-
-    // Check nearby chunks (simplified to current chunk for now)
-    int chunkX = static_cast<int>(floor(newPos.x / Chunk::chunkSize));
-    int chunkZ = static_cast<int>(floor(newPos.z / Chunk::chunkSize)); 
-
-    for (auto& chunk : chunks) {
-        glm::vec3 chunkPos = chunk.chunkPosition;
-        if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
-            static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
-            for (int x = -1; x <= 1; x++) {
-                for (int y = -1; y <= 1; y++) {
-                    for (int z = -1; z <= 1; z++) {
-                        int localX = static_cast<int>(newPos.x - chunkPos.x) + x;
-                        int localY = static_cast<int>(newPos.y - chunkPos.y) + y;
-                        int localZ = static_cast<int>(newPos.z - chunkPos.z) + z;
-
-                        if (localX >= 0 && localX < Chunk::chunkSize &&
-                            localY >= 0 && localY < Chunk::chunkHeight &&
-                            localZ >= 0 && localZ < Chunk::chunkSize) {
-                            if (chunk.blocks[localX][localY][localZ].type != BlockType::AIR) {
-                                AABB blockBox = {
-                                    chunkPos + glm::vec3(localX, localY, localZ),
-                                    chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
-                                };
-                                if (intersects(playerBox, blockBox)) {
-                                    // Vertical collision (ground or ceiling)
-                                    if (velocity.y < 0 && playerBox.max.y > blockBox.min.y &&
-                                        playerBox.min.y < blockBox.max.y) {
-                                        newPos.y = blockBox.max.y - playerAABB.min.y +0.001f;
-                                        velocity.y = 0.0f;
-                                        grounded = true;
-                                    
-                                    } else if (velocity.y > 0 && playerBox.min.y < blockBox.max.y) {
-                                        newPos.y = blockBox.min.y - playerAABB.max.y + 0.001f;
-                                        velocity.y = 0.0f;
-                                    }
-                                    // Horizontal collision (walls)
-                                    else if (velocity.x != 0 || velocity.z != 0) {
-                                        if (playerBox.min.x < blockBox.max.x && playerBox.max.x > blockBox.min.x) {
-                                            newPos.x = cameraPos.x; // Revert X movement
-                                            velocity.x = 0.0f;
-                                        }
-                                        if (playerBox.min.z < blockBox.max.z && playerBox.max.z > blockBox.min.z) {
-                                            newPos.z = cameraPos.z; // Revert Z movement
-                                            velocity.z = 0.0f;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    cameraPos = newPos; // Update position after collision checks
-
-    // Add jump (optional, now that grounded is tracked)
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && grounded) {
-        velocity.y = 8.0f; // Jump strength, adjust as needed
-    }
 
     //buiilding
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
@@ -214,51 +111,7 @@ void Main::processInput(GLFWwindow* window)
             placeBlock();
             lastPlaceTime = currentTime;
         }
-    } 
-}
-
-// Helper function for AABB intersection
-bool Main::intersects(const AABB& a, const AABB& b) {
-    return (a.min.x < b.max.x && a.max.x > b.min.x &&
-        a.min.y < b.max.y && a.max.y > b.min.y &&
-        a.min.z < b.max.z && a.max.z > b.min.z);
-}  
-
-//handles looking
-void Main::mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-
-    if (firstMouse)//stops large 1st jump
-    {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
     }
-
-    //calculate difference since last frame
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed since y-coordinates range from bottom to top
-    lastX = xpos;
-    lastY = ypos;
-
-    const float sensitivity = 0.1f;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
-
-    //add offset to stored rotation values
-    yaw += xoffset;
-    pitch += yoffset;
-
-    //vertical clamping
-    if (pitch > 89.0f)
-        pitch = 89.0f;
-    if (pitch < -89.0f)
-        pitch = -89.0f;
-
-    //do the movement part
-    lookDirection.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    lookDirection.y = sin(glm::radians(pitch));
-    lookDirection.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    cameraFront = glm::normalize(lookDirection);//set cam front to new direcction
 }
 
 
@@ -492,7 +345,7 @@ void Main::render() {
 
     //vie and projection matrices
     //lookat(position, target, up)
-    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    glm::mat4 view = player->getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
 
     //use light shader for light
@@ -562,10 +415,15 @@ void Main::render() {
 
 void Main::addChunks() {
 
+    if (seed == -1) {
+        std::random_device rd;
+        seed = rd();
+        std::cout << seed;
+    }
     int chunkCount = 0;
     
-    for (int x = -8; x <4; x++) {
-        for (int z = -8; z < 4; z++) {
+    for (int x = -8; x <8; x++) {
+        for (int z = -8; z < 8; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
                 -Chunk::baseTerrainHeight,
                 static_cast<int>(z * Chunk::chunkSize));
@@ -580,6 +438,7 @@ void Main::addChunks() {
             chunkCount++;
         }
     }
+
 }
 
 void Main::drawChunks() {
@@ -677,8 +536,8 @@ void Main::doFps() {
 
 void Main::raycastBlock() {
     hasHighlightedBlock = false;
-    glm::vec3 rayOrigin = cameraPos;
-    glm::vec3 rayDir = glm::normalize(cameraFront);
+    glm::vec3 rayOrigin = player->getCameraPos();
+    glm::vec3 rayDir = glm::normalize(player->getCameraFront());
     float t = 0.0f;
     float step = 0.1f;
 
@@ -780,37 +639,31 @@ void Main::breakBlock() {
 
 void Main::run() {
 
-    if (seed == -1) {
-        std::random_device rd;
-        seed = rd();
-        std::cout << seed;
-    }
-
-
     createCube();
     createLight();
 
     getTextures(); 
-    addChunks();
+    addChunks(); 
+
 
     createShaders();
     createHighlight();
 
 
-    glEnable(GL_CULL_FACE);   // Enable face culling 
-    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
-    glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
-    glEnable(GL_DEPTH_TEST); 
-    // Enable V-Sync to cap FPS to monitor refresh rate
-    glfwSwapInterval(1); // 1 = V-Sync on, 0 = V-Sync off 
+    player->spawn(glm::vec3(0,100,0));
+    lastFrame = glfwGetTime();
 
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode
-
-     
     // Main loop
     while (!glfwWindowShouldClose(window)) {
+
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
         //input
+        player->update(deltaTime,chunks);
         processInput(window);
+        
 
         render();
         doFps();
