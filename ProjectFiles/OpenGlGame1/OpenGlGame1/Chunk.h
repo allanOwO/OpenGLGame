@@ -18,22 +18,27 @@ struct Block
 	BlockType type;
 	glm::vec3 position;
 };
+
+class Main;//forward declaration
+
 class Chunk
 {
+	Main* main;//main pointer
+
 public:
 	static constexpr int chunkSize = 16;
 	static constexpr int chunkHeight = 128;
 	static constexpr int maxTerrainHeight = 32;
 	static constexpr int baseTerrainHeight = 64;
 
-	Chunk(glm::vec3 position,int seed);//constructor
+	Chunk(glm::vec3 position, int seed, Main* m = nullptr);//constructor
 	~Chunk();
 	// Delete copy constructor and copy assignment operator
 	Chunk(const Chunk&) = delete; 
 	Chunk& operator=(const Chunk&) = delete; 
 	// Define move constructor
 	Chunk(Chunk&& other) noexcept
-		: chunkPosition(other.chunkPosition),
+		: chunkPosition(other.chunkPosition),main(other.main),
 		verticesByType(std::move(other.verticesByType)),
 		indicesByType(std::move(other.indicesByType)),
 		baseIndicesByType(std::move(other.baseIndicesByType)),
@@ -88,8 +93,6 @@ public:
 
 private:
 	
-	
-
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block); 
 	bool isBlockSolid(int x, int y, int z);
 };

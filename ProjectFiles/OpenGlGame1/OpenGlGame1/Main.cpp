@@ -420,37 +420,41 @@ void Main::addChunks() {
         seed = rd();
         std::cout << seed;
     }
-    int chunkCount = 0;
     
     for (int x = -8; x <8; x++) {
         for (int z = -8; z < 8; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
                 -Chunk::baseTerrainHeight,
                 static_cast<int>(z * Chunk::chunkSize));
-            // Create a new chunk at (x, 0, z)
-            chunks.emplace_back(chunkPos,seed);
-            
-            // Generate the mesh for the new chunk
-            chunks.back().generateMesh();
+            // Create a new chunk at (x, 0, z), gen mesh
+            chunks.emplace(chunkPos,Chunk(chunkPos,seed,this));
+            chunks.at(chunkPos).generateMesh();
 
             // Add a new model matrix for this chunk (initially an identity matrix)
             chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
-            chunkCount++;
         }
     }
 
 }
 
+Chunk* Main::getChunk(const glm::vec3& pos) {
+    auto it = chunks.find(pos);
+    return (it != chunks.end()) ? &it->second : nullptr;
+} 
+
 void Main::drawChunks() {
-    for (int i = 0; i < chunkModels.size(); i++) {
-        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(chunkModels[i]));
+    
+    for (const auto& pair : chunks) { 
+        const glm::vec3& pos = pair.first;
+        const Chunk& chunk = pair.second;
 
-        // Draw the chunk
-        glBindVertexArray(chunks[i].VAO);
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
+        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model)); 
 
-        for (const auto& pair : chunks[i].verticesByType) {
-            BlockType type = pair.first;
-            const auto& indices = chunks[i].indicesByType[type];
+        glBindVertexArray(chunk.VAO);
+        for (const auto& typePair : chunk.verticesByType) {
+            BlockType type = typePair.first;
+            const auto& indices = chunk.indicesByType.at(type);
 
             if (indices.empty()) continue;
 
@@ -459,9 +463,9 @@ void Main::drawChunks() {
             glUniform1i(textureLocation, 0);
 
             glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
-                (void*)(chunks[i].baseIndicesByType[type] * sizeof(unsigned int)));
+                (void*)(chunk.baseIndicesByType.at(type) * sizeof(unsigned int))); 
         }
-        glBindVertexArray(0);
+        glBindVertexArray(0); 
     }
 }
 
@@ -535,7 +539,7 @@ void Main::doFps() {
  
 
 void Main::raycastBlock() {
-    hasHighlightedBlock = false;
+    hasHighlightedBlock = false; 
     glm::vec3 rayOrigin = player->getCameraPos();
     glm::vec3 rayDir = glm::normalize(player->getCameraFront());
     float t = 0.0f;
@@ -543,35 +547,36 @@ void Main::raycastBlock() {
 
     for (t = 0.0f; t < reachDistance; t += step) {
         glm::vec3 currentPos = rayOrigin + rayDir * t;
-        int chunkX = static_cast<int>(floor(currentPos.x / Chunk::chunkSize));
-        int chunkZ = static_cast<int>(floor(currentPos.z / Chunk::chunkSize));
 
-        // Find the chunk and compute local coordinates
-        for (auto& chunk : chunks) {
-            glm::vec3 chunkPos = chunk.chunkPosition;
-            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
-                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
-                // Adjust Y relative to chunk's base position
-                int localX = static_cast<int>(floor(currentPos.x)) % Chunk::chunkSize;
-                int localZ = static_cast<int>(floor(currentPos.z)) % Chunk::chunkSize;
-                int localY = static_cast<int>(floor(currentPos.y - chunkPos.y)); // Offset by chunk Y
+        // Calculate the chunk position (assuming chunks are keyed at multiples of chunkSize in X and Z)
+        glm::vec3 chunkPos = glm::floor(currentPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
+        chunkPos.y = -Chunk::baseTerrainHeight; // Set to the fixed Y-position of chunks (adjust as needed)
 
-                if (localX < 0) localX += Chunk::chunkSize;
-                if (localZ < 0) localZ += Chunk::chunkSize;
+        // Look up the chunk in the map
+        auto it = chunks.find(chunkPos);
+        if (it != chunks.end()) {
+            Chunk& chunk = it->second;
 
-                if (localY >= 0 && localY < Chunk::chunkHeight) {
-                    Block& block = chunk.blocks[localX][localY][localZ];
-                    //when hit block
-                    if (block.type != BlockType::AIR) {
-                        highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
-                        hasHighlightedBlock = true;
-                        
-                        // Compute normal based on ray direction and hit position
-                        glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
-                        prevBlock = glm::vec3(floor(prevPos.x), floor(prevPos.y), floor(prevPos.z));
-                        
-                        return;
-                    }
+            // Calculate local coordinates within the chunk
+            int localX = static_cast<int>(currentPos.x - chunk.chunkPosition.x);
+            int localY = static_cast<int>(currentPos.y - chunk.chunkPosition.y);
+            int localZ = static_cast<int>(currentPos.z - chunk.chunkPosition.z);
+
+            // Check if local coordinates are within chunk bounds
+            if (localX >= 0 && localX < Chunk::chunkSize &&
+                localY >= 0 && localY < Chunk::chunkHeight &&
+                localZ >= 0 && localZ < Chunk::chunkSize) {
+                Block& block = chunk.blocks[localX][localY][localZ];
+                if (block.type != BlockType::AIR) {
+                    // Set highlighted block position
+                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
+                    hasHighlightedBlock = true;
+
+                    // Compute previous block position for normal calculation
+                    glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
+                    prevBlock = glm::vec3(floor(prevPos.x), floor(prevPos.y), floor(prevPos.z));
+
+                    return;
                 }
             }
         }
@@ -581,29 +586,23 @@ void Main::raycastBlock() {
 void Main::placeBlock() {
     if (hasHighlightedBlock) {
         glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal
-        int chunkX = static_cast<int>(floor(placePos.x / Chunk::chunkSize));
-        int chunkZ = static_cast<int>(floor(placePos.z / Chunk::chunkSize));
+        glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize); 
+        chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        for (auto& chunk : chunks) {
-            glm::vec3 chunkPos = chunk.chunkPosition;
-            int chunkPosX = static_cast<int>(chunkPos.x / Chunk::chunkSize);
-            int chunkPosZ = static_cast<int>(chunkPos.z / Chunk::chunkSize);
+        auto it = chunks.find(chunkPos); 
+        if (it != chunks.end()) {
+            Chunk& chunk = it->second;
+            // Calculate local coordinates
+            int localX = static_cast<int>(placePos.x - chunkPos.x);
+            int localY = static_cast<int>(placePos.y - chunkPos.y);
+            int localZ = static_cast<int>(placePos.z - chunkPos.z);
 
-            if (chunkPosX == chunkX && chunkPosZ == chunkZ) {
-                // Compute local coordinates relative to the chunk's position
-                int localX = static_cast<int>(placePos.x - chunkPos.x);
-                int localY = static_cast<int>(placePos.y - chunkPos.y);
-                int localZ = static_cast<int>(placePos.z - chunkPos.z);
-
-                // Ensure local coordinates are within chunk bounds
-                if (localX >= 0 && localX < Chunk::chunkSize &&
-                    localY >= 0 && localY < Chunk::chunkHeight &&
-                    localZ >= 0 && localZ < Chunk::chunkSize) {
-                    if (chunk.blocks[localX][localY][localZ].type == BlockType::AIR) {
-                        chunk.setBlock(localX, localY, localZ, BlockType::STONE);
-                        ///chunk.generateMesh(); // Regenerate mesh after placing
-                    }
-                    return;
+            // Check bounds and place the block
+            if (localX >= 0 && localX < Chunk::chunkSize &&
+                localY >= 0 && localY < Chunk::chunkHeight &&
+                localZ >= 0 && localZ < Chunk::chunkSize) {
+                if (chunk.blocks[localX][localY][localZ].type == BlockType::AIR) {
+                    chunk.setBlock(localX, localY, localZ, BlockType::STONE);
                 }
             }
         }
@@ -612,27 +611,27 @@ void Main::placeBlock() {
 
 void Main::breakBlock() { 
     if (hasHighlightedBlock) {
-        int chunkX = static_cast<int>(floor(highlightedBlockPos.x / Chunk::chunkSize));
-        int chunkZ = static_cast<int>(floor(highlightedBlockPos.z / Chunk::chunkSize));
 
-        for (auto& chunk : chunks) {
-            glm::vec3 chunkPos = chunk.chunkPosition;
-            if (static_cast<int>(chunkPos.x / Chunk::chunkSize) == chunkX &&
-                static_cast<int>(chunkPos.z / Chunk::chunkSize) == chunkZ) {
-                int localX = static_cast<int>(highlightedBlockPos.x) % Chunk::chunkSize;
-                int localY = static_cast<int>(highlightedBlockPos.y - chunkPos.y);
-                int localZ = static_cast<int>(highlightedBlockPos.z) % Chunk::chunkSize;
 
-                if (localX < 0) localX += Chunk::chunkSize;
-                if (localZ < 0) localZ += Chunk::chunkSize;
+        glm::vec3 chunkPos = glm::floor(highlightedBlockPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
+        chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-                if (localY >= 0 && localY < Chunk::chunkHeight) {
-                    chunk.setBlock(localX, localY, localZ, BlockType::AIR);
-                   // chunk.generateMesh(); // Regenerate mesh after breaking
-                    return;
-                }
+        // Find the chunk in the map
+        auto it = chunks.find(chunkPos);
+        if (it != chunks.end()) {
+            Chunk& chunk = it->second;
+            // Calculate local coordinates
+            int localX = static_cast<int>(highlightedBlockPos.x - chunkPos.x);
+            int localY = static_cast<int>(highlightedBlockPos.y - chunkPos.y);
+            int localZ = static_cast<int>(highlightedBlockPos.z - chunkPos.z);
+
+            // Check bounds and break the block
+            if (localX >= 0 && localX < Chunk::chunkSize &&
+                localY >= 0 && localY < Chunk::chunkHeight &&
+                localZ >= 0 && localZ < Chunk::chunkSize) {
+                chunk.setBlock(localX, localY, localZ, BlockType::AIR);
             }
-        }
+        } 
     }
 }
 

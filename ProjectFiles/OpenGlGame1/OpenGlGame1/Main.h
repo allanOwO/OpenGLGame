@@ -10,9 +10,10 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Chunk.h"
-#include <map>
+#include <unordered_map>
 
 #include "Player.h"
+#include "Vec3Hash.h"
 
 
 class Main
@@ -23,6 +24,7 @@ public:
 	float width, height;
 
 	void run();
+	Chunk* getChunk(const glm::vec3& pos);
 
 private:
 
@@ -54,7 +56,7 @@ private:
 	std::map<BlockType, GLuint> textureMap;
 
 	//chunk stuff
-	std::vector<Chunk> chunks;
+	std::unordered_map<glm::vec3,Chunk,Vec3Hash> chunks;
 	std::vector<glm::mat4> chunkModels;//array of chunk models
 	void addChunks();
 	void drawChunks();

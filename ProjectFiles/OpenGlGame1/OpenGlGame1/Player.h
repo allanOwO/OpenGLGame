@@ -4,12 +4,15 @@
 #include <vector>
 #include "Chunk.h"
 
+#include<unordered_map>
+#include "Vec3Hash.h"
+
 //players bounding box(collsisions)
 struct AABB {
 	glm::vec3 min;
 	glm::vec3 max;
 };
-
+ 
 class Player
 {
 public:
@@ -17,7 +20,7 @@ public:
 	Player(GLFWwindow* window);
 	
 	void spawn(glm::vec3 spawnPos); 
-	void update(float deltaTime, std::vector<Chunk>& chunks);
+	void update(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks); 
 
 	// Getters for rendering
 	glm::vec3 getCameraPos() const { return cameraPos; }
@@ -28,7 +31,7 @@ public:
 
 private:
 	void processMouseMovement(GLFWwindow* window, double xpos, double ypos);
-	void playerMovement(float deltaTime,std::vector<Chunk>& chunks);	
+	void playerMovement(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks);
 
 	GLFWwindow* window;	
 
@@ -42,7 +45,7 @@ private:
 	float yaw = -90.0f;//offest at beginign to allign to -z
 	float pitch = 0.0f;
 
-	const float camSpeedBase = 10.0f;
+	const float camSpeedBase = 1000.0f;
 	const float lookSens = 0.1f;
 
 

@@ -4,8 +4,10 @@
 #include <iostream>
 #include <FastNoiseLite.h>
 
-Chunk::Chunk(glm::vec3 position,int seed)
-	: chunkPosition(position),VAO(0),VBO(0),EBO(0) {
+#include "Main.h"//need for full main deffinition
+
+Chunk::Chunk(glm::vec3 position,int seed, Main* m)
+	: chunkPosition(position),main(m), VAO(0), VBO(0), EBO(0) {
 
 	/// Initialize chunk blocks using 3D vector storage
 	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkHeight, std::vector<Block>(chunkSize))); 
@@ -96,6 +98,10 @@ void Chunk::generateMesh() {
 		indexOffset += indices.size();
 	}
 
+	std::cout << "Total vertices stored: " << allVertices.size() / 11 << std::endl;
+	std::cout << "Total float size (MB): " << (allVertices.size() * sizeof(float)) / (1024.0f * 1024.0f) << " MB\n";
+
+
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
 
@@ -106,11 +112,11 @@ void Chunk::generateMesh() {
 	// Vertex attributes
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0); // Position 
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float))); // Color
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float))); // Color 
 	glEnableVertexAttribArray(1); 
 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float))); // Texture
 	glEnableVertexAttribArray(2); 
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float))); // Normal
+	glVertexAttribPointer(3, 3, GL_HALF_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float))); // Normal
 	glEnableVertexAttribArray(3); 
 
 	glBindVertexArray(0);
@@ -172,9 +178,9 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 		bool cullFace = false;
 
 		// Convert to local chunk space for safe indexing
-		int localX = int(pos.x) % chunkSize;
-		int localY = int(pos.y) % chunkHeight;
-		int localZ = int(pos.z) % chunkSize;
+		int localX = int(pos.x);
+		int localY = int(pos.y);
+		int localZ = int(pos.z);
 		if (localX < 0) localX += chunkSize;
 		if (localY < 0) localY += chunkHeight;
 		if (localZ < 0) localZ += chunkSize;
@@ -224,14 +230,70 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 }
 
 bool Chunk::isBlockSolid(int x, int y, int z) {
-	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize)
-		return false; // Treat out-of-bounds as empty space
-	return blocks[x][y][z].type != BlockType::AIR;
+
+	if (y < 0 || y >= chunkHeight) {
+		return false;
+	}
+
+	if (x >= 0 && x < chunkSize && y >= 0 && y < chunkHeight && z >= 0 && z < chunkSize) {
+		return blocks[x][y][z].type != BlockType::AIR;
+	} 
+
+	// Position is outside this chunk, find the neighboring chunk
+	glm::vec3 chunkOffset(0);
+	if (x < 0) chunkOffset.x = -chunkSize;
+	else if (x >= chunkSize) chunkOffset.x = chunkSize;
+	if (z < 0) chunkOffset.z = -chunkSize;
+	else if (z >= chunkSize) chunkOffset.z = chunkSize;
+	// Assume y is fixed for simplicity; adjust if chunks stack vertically 
+
+	glm::vec3 neighborPos = chunkPosition + chunkOffset;
+	Chunk* neighbor = main->getChunk(neighborPos); 
+	if (!neighbor) {
+		return false; // No chunk exists, assume air
+	}
+
+	// Adjust coordinates to be local to the neighboring chunk
+	int localX = x < 0 ? x + chunkSize : x % chunkSize;
+	int localZ = z < 0 ? z + chunkSize : z % chunkSize;
+	int localY = y;
+	return neighbor->isBlockSolid(localX, localY, localZ);
 }
 
 void Chunk::setBlock(int x, int y, int z, BlockType type) {
 	if (x >= 0 && x < chunkSize && y >= 0 && y < chunkHeight && z >= 0 && z < chunkSize) {
 		blocks[x][y][z] = { type, glm::vec3(x, y, z) };
 		generateMesh(); // Regenerate the mesh to reflect the change
+
+		//if blocks on border update neighbor chunk mesh
+		// Update neighboring chunks if the block is on a border.
+		// Left neighbor (x == 0)
+		if (x == 0) { 
+			glm::vec3 neighborPos = chunkPosition - glm::vec3(chunkSize, 0, 0);
+			if (Chunk* neighbor = main->getChunk(neighborPos)) {
+				neighbor->generateMesh();
+			}
+		} 
+		// Right neighbor (x == chunkSize - 1)
+		if (x == chunkSize - 1) {
+			glm::vec3 neighborPos = chunkPosition + glm::vec3(chunkSize, 0, 0);
+			if (Chunk* neighbor = main->getChunk(neighborPos)) {
+				neighbor->generateMesh();
+			}
+		}
+		// Front neighbor (z == 0)
+		if (z == 0) {
+			glm::vec3 neighborPos = chunkPosition - glm::vec3(0, 0, chunkSize);
+			if (Chunk* neighbor = main->getChunk(neighborPos)) {
+				neighbor->generateMesh();
+			}
+		}
+		// Back neighbor (z == chunkSize - 1)
+		if (z == chunkSize - 1) {
+			glm::vec3 neighborPos = chunkPosition + glm::vec3(0, 0, chunkSize);
+			if (Chunk* neighbor = main->getChunk(neighborPos)) {
+				neighbor->generateMesh();
+			}
+		}
 	}
 }
