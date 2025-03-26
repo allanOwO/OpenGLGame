@@ -1,8 +1,10 @@
 #include "Player.h"
+#include <iostream>//print
+
 
 
 Player::Player(GLFWwindow* window) 
-    : window(window), velocity(0.0f), cameraFront(0.0f, 0.0f, -1.0f), cameraUp(0.0f, 1.0f, 0.0f), firstMouse(true),grounded(false) {
+    : window(window), velocity(0.0f), bodyPos(0.0f), cameraFront(0.0f, 0.0f, -1.0f), cameraUp(0.0f, 1.0f, 0.0f), firstMouse(true),grounded(false) {
 
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -20,7 +22,9 @@ Player::Player(GLFWwindow* window)
 }
 
 void Player::spawn(glm::vec3 spawnPos) {
-    cameraPos = spawnPos;
+    bodyPos = spawnPos;
+    cameraPos = bodyPos + glm::vec3(0,eyeLevel, 0);
+    std::cout << "Spawn - Eyes: " << cameraPos.y << ", Feet: " << cameraPos.y + playerAABB.min.y << "\n";
 }
 
 void Player::update(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
@@ -68,23 +72,17 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     float camSpeed = camSpeedBase * deltaTime;
 
     // Apply gravity
-    velocity.y += gravity * deltaTime; // Accelerate downward
+    velocity.y += gravity * deltaTime;
 
     // WASD Input
     glm::vec3 moveDir(0.0f);
-    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp)); // Right vector
-    glm::vec3 forward = glm::normalize(glm::vec3(cameraFront.x, 0.0f, cameraFront.z)); // Flatten forward vector
+    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+    glm::vec3 forward = glm::normalize(glm::vec3(cameraFront.x, 0.0f, cameraFront.z));
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) moveDir += forward;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) moveDir -= forward;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) moveDir += right;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) moveDir -= right;
 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        moveDir += forward;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        moveDir -= forward;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        moveDir += right;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        moveDir -= right;
-
-    // Normalize input and apply velocity
     if (glm::length(moveDir) > 0.0f) {
         moveDir = glm::normalize(moveDir);
         velocity.x = moveDir.x * camSpeed;
@@ -95,40 +93,33 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
         velocity.z *= 0.9f;
     }
 
-    // Proposed new position
-    glm::vec3 newPos = cameraPos + velocity * deltaTime;
+    // Proposed new position (step-by-step for each axis)
+    glm::vec3 newPos = bodyPos;
     AABB playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
-
-    // Reset grounded state before collision checks
     grounded = false;
 
-    // Calculate the player's chunk position
+    // Player's chunk position
     glm::vec3 playerChunkPos = glm::floor(newPos / glm::vec3(Chunk::chunkSize, 1.0f, Chunk::chunkSize)) *
         glm::vec3(Chunk::chunkSize, 0.0f, Chunk::chunkSize);
-    // Assuming y-coordinate is fixed or defined elsewhere (e.g., -Chunk::baseTerrainHeight)
-    playerChunkPos.y = -Chunk::baseTerrainHeight; // Adjust this based on your world setup
+    playerChunkPos.y = -Chunk::baseTerrainHeight;
 
-    // Check the player's chunk and immediate neighbors
+    // Step 1: Resolve X-axis
+    newPos.x += velocity.x * deltaTime;
+    playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
             auto it = chunks.find(checkChunkPos);
             if (it != chunks.end()) {
-                const Chunk& chunk = it->second; // Access the Chunk object
-                glm::vec3 chunkPos = it->first;  // Chunk position from the map key
-
-                // Check blocks around the player
+                const Chunk& chunk = it->second;
+                glm::vec3 chunkPos = it->first;
                 for (int bx = -1; bx <= 1; bx++) {
                     for (int by = -1; by <= 1; by++) {
                         for (int bz = -1; bz <= 1; bz++) {
-                            // World position of the block
                             glm::vec3 blockWorldPos = glm::floor(newPos) + glm::vec3(bx, by, bz);
-                            // Local position within the chunk
                             int localX = static_cast<int>(blockWorldPos.x - chunkPos.x);
                             int localY = static_cast<int>(blockWorldPos.y - chunkPos.y);
                             int localZ = static_cast<int>(blockWorldPos.z - chunkPos.z);
-
-                            // Ensure the block is within chunk bounds
                             if (localX >= 0 && localX < Chunk::chunkSize &&
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
@@ -139,33 +130,102 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
                                     };
                                     if (intersects(playerBox, blockBox)) {
-
-                                        if (velocity.y < 0) { // Moving down
-                                            // Check if the player's feet are colliding with a block's top
-                                            if (playerBox.max.y > blockBox.min.y && playerBox.min.y < blockBox.max.y) {
-                                                newPos.y = blockBox.max.y - playerAABB.min.y + 0.001f;
-                                                velocity.y = 0.0f;
-                                                grounded = true;
-                                            }
+                                        if (velocity.x > 0) {
+                                            newPos.x = blockBox.min.x - playerAABB.max.x - 0.001f;
                                         }
-                                        else if (velocity.y > 0) { // Moving up
-                                            // Check if the player's head is colliding with a block's bottom.
-                                            if (playerBox.max.y > blockBox.min.y && playerBox.max.y < blockBox.max.y) {
-                                                newPos.y = blockBox.min.y - playerAABB.max.y - 0.001f;
-                                                velocity.y = 0.0f;
-                                            }
+                                        else if (velocity.x < 0) {
+                                            newPos.x = blockBox.max.x - playerAABB.min.x + 0.001f;
                                         }
+                                        velocity.x = 0.0f;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-                                        // Horizontal collision (walls)
-                                        if (velocity.x != 0 || velocity.z != 0) {
-                                            if (playerBox.min.x < blockBox.max.x && playerBox.max.x > blockBox.min.x) {
-                                                newPos.x = cameraPos.x;
-                                                velocity.x = 0.0f;
-                                            }
-                                            if (playerBox.min.z < blockBox.max.z && playerBox.max.z > blockBox.min.z) {
-                                                newPos.z = cameraPos.z;
-                                                velocity.z = 0.0f;
-                                            }
+    // Step 2: Resolve Z-axis
+    newPos.z += velocity.z * deltaTime;
+    playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
+            auto it = chunks.find(checkChunkPos);
+            if (it != chunks.end()) {
+                const Chunk& chunk = it->second;
+                glm::vec3 chunkPos = it->first;
+                for (int bx = -1; bx <= 1; bx++) {
+                    for (int by = -1; by <= 1; by++) {
+                        for (int bz = -1; bz <= 1; bz++) {
+                            glm::vec3 blockWorldPos = glm::floor(newPos) + glm::vec3(bx, by, bz);
+                            int localX = static_cast<int>(blockWorldPos.x - chunkPos.x);
+                            int localY = static_cast<int>(blockWorldPos.y - chunkPos.y);
+                            int localZ = static_cast<int>(blockWorldPos.z - chunkPos.z);
+                            if (localX >= 0 && localX < Chunk::chunkSize &&
+                                localY >= 0 && localY < Chunk::chunkHeight &&
+                                localZ >= 0 && localZ < Chunk::chunkSize) {
+                                const Block& block = chunk.blocks[localX][localY][localZ];
+                                if (block.type != BlockType::AIR) {
+                                    AABB blockBox = {
+                                        chunkPos + glm::vec3(localX, localY, localZ),
+                                        chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
+                                    };
+                                    if (intersects(playerBox, blockBox)) {
+                                        if (velocity.z > 0) {
+                                            newPos.z = blockBox.min.z - playerAABB.max.z - 0.001f;
+                                        }
+                                        else if (velocity.z < 0) {
+                                            newPos.z = blockBox.max.z - playerAABB.min.z + 0.001f;
+                                        }
+                                        velocity.z = 0.0f;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 3: Resolve Y-axis
+    newPos.y += velocity.y * deltaTime;
+    playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
+            auto it = chunks.find(checkChunkPos);
+            if (it != chunks.end()) {
+                const Chunk& chunk = it->second;
+                glm::vec3 chunkPos = it->first;
+                for (int bx = -1; bx <= 1; bx++) {
+                    for (int by = -1; by <= 1; by++) {
+                        for (int bz = -1; bz <= 1; bz++) {
+                            glm::vec3 blockWorldPos = glm::floor(newPos) + glm::vec3(bx, by, bz);
+                            int localX = static_cast<int>(blockWorldPos.x - chunkPos.x);
+                            int localY = static_cast<int>(blockWorldPos.y - chunkPos.y);
+                            int localZ = static_cast<int>(blockWorldPos.z - chunkPos.z);
+                            if (localX >= 0 && localX < Chunk::chunkSize &&
+                                localY >= 0 && localY < Chunk::chunkHeight &&
+                                localZ >= 0 && localZ < Chunk::chunkSize) {
+                                const Block& block = chunk.blocks[localX][localY][localZ];
+                                if (block.type != BlockType::AIR) {
+                                    AABB blockBox = {
+                                        chunkPos + glm::vec3(localX, localY, localZ),
+                                        chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
+                                    };
+                                    if (intersects(playerBox, blockBox)) {
+                                        if (velocity.y < 0) { // Falling
+                                            newPos.y = blockBox.max.y - playerAABB.min.y + 0.001f;
+                                            velocity.y = 0.0f;
+                                            grounded = true;
+                                        }
+                                        else if (velocity.y > 0) { // Jumping
+                                            newPos.y = blockBox.min.y - playerAABB.max.y - 0.001f;
+                                            velocity.y = 0.0f;
                                         }
                                     }
                                 }
@@ -174,15 +234,18 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                     }
                 }
             }
-        } 
+        }
     }
 
     // Update position
-    cameraPos = newPos;
+    bodyPos = newPos;
+    cameraPos = bodyPos + glm::vec3(0.0f, eyeLevel, 0.0f);  // Recalculate the camera position as an offset
+
+    std::cout << "Post-Movement - Eyes: " << cameraPos.y << ", Feet: " << cameraPos.y + playerAABB.min.y << std::endl;
 
     // Jump logic
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && grounded) {
-        velocity.y = 12.0f; // Jump strength
+        velocity.y = jumpForce;
     }
 }
 

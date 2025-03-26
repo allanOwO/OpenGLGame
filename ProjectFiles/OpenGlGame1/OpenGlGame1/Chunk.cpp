@@ -98,8 +98,8 @@ void Chunk::generateMesh() {
 		indexOffset += indices.size();
 	}
 
-	std::cout << "Total vertices stored: " << allVertices.size() / 11 << std::endl;
-	std::cout << "Total float size (MB): " << (allVertices.size() * sizeof(float)) / (1024.0f * 1024.0f) << " MB\n";
+	//std::cout << "Total vertices stored: " << allVertices.size() / 11 << std::endl;
+	//std::cout << "Total float size (MB): " << (allVertices.size() * sizeof(float)) / (1024.0f * 1024.0f) << " MB\n";
 
 
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);

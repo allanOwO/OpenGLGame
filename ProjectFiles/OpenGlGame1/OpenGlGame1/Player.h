@@ -53,9 +53,12 @@ private:
 	float lastX = 400, lastY = 300;
 
 	//movement
+	glm::vec3 bodyPos;
+	float eyeLevel = 1.6f;
+	float jumpForce = 4.0f;
 	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
 	float gravity = -9.8f; // Gravity strength (tune this) 
-	AABB playerAABB = { glm::vec3(-0.3f, -1.0f, -0.3f), glm::vec3(0.3f, 1.0f, 0.3f) }; // Example size
+	AABB playerAABB = { glm::vec3(-0.3f, 0.0f, -0.3f), glm::vec3(0.3f, 1.8f, 0.3f) }; // Example size
 	bool intersects(const AABB& a, const AABB& b);
 	bool grounded;
 
