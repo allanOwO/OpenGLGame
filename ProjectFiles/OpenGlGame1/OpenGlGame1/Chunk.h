@@ -4,6 +4,8 @@
 #include<map>
 #include <glad/glad.h>
 #include<GLFW/glfw3.h>
+#include "Vec3Hash.h"
+#include <unordered_map>
 
 enum class BlockType {
 	AIR,
@@ -16,7 +18,6 @@ enum class BlockType {
 struct Block
 {
 	BlockType type;
-	glm::vec3 position;
 };
 
 class Main;//forward declaration
@@ -27,7 +28,7 @@ class Chunk
 
 public:
 	static constexpr int chunkSize = 16;
-	static constexpr int chunkHeight = 128;
+	static constexpr int chunkHeight = 256;
 	static constexpr int maxTerrainHeight = 32;
 	static constexpr int baseTerrainHeight = 64;
 
@@ -81,6 +82,7 @@ public:
 
 	void generateMesh();//creates chunk mesh
 	void setBlock(int x, int y, int z, BlockType type); 
+	void updateMesh();
 
 	unsigned int VBO, VAO, EBO;
 
@@ -89,11 +91,14 @@ public:
 	std::map<BlockType, unsigned int> baseIndicesByType; // Track base index per type 
 	glm::vec3 chunkPosition;
 
-	std::vector<std::vector<std::vector<Block>>> blocks;//list of all blocks in chunk 
+	std::unordered_map<glm::ivec3, BlockType, IVec3Hash> blocks; 
 
 private:
 	
-	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block); 
+	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos); 
 	bool isBlockSolid(int x, int y, int z);
+
+	std::vector<glm::ivec3> dirtyBlocks; // Add this 
+	bool fullRebuildNeeded = true; // For initial load 
 };
 

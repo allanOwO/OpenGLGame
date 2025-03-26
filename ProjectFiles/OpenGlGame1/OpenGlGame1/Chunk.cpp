@@ -9,9 +9,11 @@
 Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 	: chunkPosition(position),main(m), VAO(0), VBO(0), EBO(0) {
 
-	/// Initialize chunk blocks using 3D vector storage
-	blocks.resize(chunkSize, std::vector<std::vector<Block>>(chunkHeight, std::vector<Block>(chunkSize))); 
+	size_t maxBlocks = chunkSize * chunkHeight * chunkSize; // Worst case: fully solid
+	size_t expectedBlocks = chunkSize * (chunkHeight / 2) * chunkSize; // Assume half height
+	blocks.reserve(std::min(expectedBlocks, blocks.max_size() / 2));
 
+	 
 	FastNoiseLite noise;
 	noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
 	noise.SetFrequency(0.03f); // Lower frequency for smoother terrain
@@ -28,22 +30,30 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 
 			for (int y = 0; y < chunkHeight; y++) {
 
+				glm::ivec3 pos(x, y, z);
+
+				BlockType type; 
+
+				//dont add block type for air as its left empty
 				if (y > terrainHeight) {
-					blocks[x][y][z] = { BlockType::AIR, glm::vec3(x, y, z) };
+					continue;
 				}
-				else if (y == terrainHeight) {
-					blocks[x][y][z] = { BlockType::GRASS, glm::vec3(x, y, z) };
+				if (y == terrainHeight) {
+					type = BlockType::GRASS;
 				}
-				else if (y >= terrainHeight - 1) {
-					blocks[x][y][z] = { BlockType::DIRT, glm::vec3(x, y, z) };
+				else if (y >= terrainHeight - 3) {
+					type = BlockType::DIRT;
 				}
 				else {
-					blocks[x][y][z] = { BlockType::STONE, glm::vec3(x, y, z) };
+					type = BlockType::STONE;
 				}
+
+				blocks[pos] = type; 
 			}
 		}
 	}
 	
+	std::cout << "Blocks: " << blocks.size() << " (~" << blocks.size() * 32 / 1024 << " KB)" << std::endl;
 
 }
 
@@ -54,18 +64,15 @@ Chunk::~Chunk() {
 }
 
 void Chunk::generateMesh() {
+
 	verticesByType.clear();
 	indicesByType.clear();
 	baseIndicesByType.clear();
 
-	for (int y = 0; y < chunkHeight; y++) {
-		for (int x = 0; x < chunkSize; x++) {
-			for (int z = 0; z < chunkSize; z++) {
-				Block& block = blocks[x][y][z];
-				if (block.type == BlockType::AIR) continue;
-				generateBlockFaces(verticesByType[block.type], indicesByType[block.type], block);
-			}
-		}
+	//itterate existing blocks, excludes air
+	for (const auto& b : blocks) {
+		// .second means the second item in the map, so here it is block 
+		generateBlockFaces(verticesByType[b.second], indicesByType[b.second], b.first); 
 	}
 
 	// Set up VAO/VBO/EBO for the entire chunk
@@ -101,6 +108,10 @@ void Chunk::generateMesh() {
 	//std::cout << "Total vertices stored: " << allVertices.size() / 11 << std::endl;
 	//std::cout << "Total float size (MB): " << (allVertices.size() * sizeof(float)) / (1024.0f * 1024.0f) << " MB\n";
 
+	std::cout << "Chunk at " << chunkPosition.x << "," << chunkPosition.z 
+		<< ": Vertices: " << allVertices.size() / 11 << " (" << allVertices.size() * 4 / 1024 << " KB), " 
+		<< "Indices: " << allIndices.size() << " (" << allIndices.size() * 4 / 1024 << " KB)" << std::endl; 
+
 
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
@@ -123,10 +134,10 @@ void Chunk::generateMesh() {
 }
 
 
-void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const Block& block) {
+void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos) {
 
 	//block position in chunk local space
-	glm::vec3 pos = block.position;
+	glm::vec3 pos = blockPos;
 
 	float size = 1.0f;
 	glm::vec3 color(0.5f, 0.5f, 0.5f);//default colour
@@ -235,9 +246,13 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 		return false;
 	}
 
-	if (x >= 0 && x < chunkSize && y >= 0 && y < chunkHeight && z >= 0 && z < chunkSize) {
-		return blocks[x][y][z].type != BlockType::AIR;
-	} 
+	glm::ivec3 pos(x, y, z); 
+
+	if (x >= 0 && x < chunkSize && z >= 0 && z < chunkSize) {//if in chunk
+		auto it = blocks.find(pos);
+		return it != blocks.end() && it->second != BlockType::AIR; 
+	}
+	
 
 	// Position is outside this chunk, find the neighboring chunk
 	glm::vec3 chunkOffset(0);
@@ -261,39 +276,67 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 }
 
 void Chunk::setBlock(int x, int y, int z, BlockType type) {
-	if (x >= 0 && x < chunkSize && y >= 0 && y < chunkHeight && z >= 0 && z < chunkSize) {
-		blocks[x][y][z] = { type, glm::vec3(x, y, z) };
-		generateMesh(); // Regenerate the mesh to reflect the change
+	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return;//if outside chunk
 
-		//if blocks on border update neighbor chunk mesh
-		// Update neighboring chunks if the block is on a border.
-		// Left neighbor (x == 0)
-		if (x == 0) { 
-			glm::vec3 neighborPos = chunkPosition - glm::vec3(chunkSize, 0, 0);
-			if (Chunk* neighbor = main->getChunk(neighborPos)) {
-				neighbor->generateMesh();
-			}
-		} 
-		// Right neighbor (x == chunkSize - 1)
-		if (x == chunkSize - 1) {
-			glm::vec3 neighborPos = chunkPosition + glm::vec3(chunkSize, 0, 0);
-			if (Chunk* neighbor = main->getChunk(neighborPos)) {
-				neighbor->generateMesh();
-			}
-		}
-		// Front neighbor (z == 0)
-		if (z == 0) {
-			glm::vec3 neighborPos = chunkPosition - glm::vec3(0, 0, chunkSize);
-			if (Chunk* neighbor = main->getChunk(neighborPos)) {
-				neighbor->generateMesh();
-			}
-		}
-		// Back neighbor (z == chunkSize - 1)
-		if (z == chunkSize - 1) {
-			glm::vec3 neighborPos = chunkPosition + glm::vec3(0, 0, chunkSize);
-			if (Chunk* neighbor = main->getChunk(neighborPos)) {
-				neighbor->generateMesh();
-			}
+	glm::ivec3 pos(x, y, z);
+
+	if (type == BlockType::AIR) {
+		blocks.erase(pos);
+	}
+	else {
+		blocks.emplace(pos, type);    
+	}
+
+	generateMesh();
+}
+
+void Chunk::updateMesh() {
+
+	//first chunk build
+	if (fullRebuildNeeded) {
+		generateMesh();
+		fullRebuildNeeded = false;
+		dirtyBlocks.clear();
+		return;
+	}
+
+	if (dirtyBlocks.empty()) return;//if no blocks updates needed
+
+	// Update only dirty blocks
+	std::unordered_map<BlockType, std::vector<float>> tempVerts;
+	std::unordered_map<BlockType, std::vector<unsigned int>> tempIdxs;
+	for (const auto& pos : dirtyBlocks) {
+		auto it = blocks.find(pos);
+		BlockType type = (it != blocks.end()) ? it->second : BlockType::AIR;
+		tempVerts[type].clear();
+		tempIdxs[type].clear();
+		if (type != BlockType::AIR) {
+			generateBlockFaces(tempVerts[type], tempIdxs[type], pos);
 		}
 	}
+
+	// Merge into existing buffers
+	for (const auto& it : tempVerts) {
+		verticesByType[it.first] = std::move(it.second);
+		indicesByType[it.first] = std::move(tempIdxs[it.first]);
+	} 
+
+	// Update only the changed vertices and indices
+	for (const auto& it : tempVerts) {
+		BlockType type = it.first; 
+		auto& vertices = it.second; 
+		auto& indices = tempIdxs[type]; 
+
+		unsigned int baseIndex = baseIndicesByType[type];
+
+		// Update vertices for the specific block type
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);
+		glBufferSubData(GL_ARRAY_BUFFER, baseIndex * 11 * sizeof(float), vertices.size() * sizeof(float), vertices.data());
+
+		// Update indices for the specific block type
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, baseIndex * sizeof(unsigned int), indices.size() * sizeof(unsigned int), indices.data());
+	}
+	 
+	dirtyBlocks.clear();  
 }

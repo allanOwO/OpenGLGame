@@ -23,8 +23,7 @@ Player::Player(GLFWwindow* window)
 
 void Player::spawn(glm::vec3 spawnPos) {
     bodyPos = spawnPos;
-    cameraPos = bodyPos + glm::vec3(0,eyeLevel, 0);
-    std::cout << "Spawn - Eyes: " << cameraPos.y << ", Feet: " << cameraPos.y + playerAABB.min.y << "\n";
+    cameraPos = bodyPos + glm::vec3(0, eyeLevel, 0);
 }
 
 void Player::update(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
@@ -123,8 +122,12 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                             if (localX >= 0 && localX < Chunk::chunkSize &&
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
-                                const Block& block = chunk.blocks[localX][localY][localZ];
-                                if (block.type != BlockType::AIR) {
+
+
+                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ);
+                                auto block = chunk.blocks.find(blockKey); 
+
+                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
@@ -167,8 +170,11 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                             if (localX >= 0 && localX < Chunk::chunkSize &&
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
-                                const Block& block = chunk.blocks[localX][localY][localZ];
-                                if (block.type != BlockType::AIR) {
+
+                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ);
+                                auto block = chunk.blocks.find(blockKey);
+
+                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
@@ -211,8 +217,11 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                             if (localX >= 0 && localX < Chunk::chunkSize &&
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
-                                const Block& block = chunk.blocks[localX][localY][localZ];
-                                if (block.type != BlockType::AIR) {
+
+                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ); 
+                                auto block = chunk.blocks.find(blockKey); 
+                                 
+                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
@@ -240,9 +249,6 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     // Update position
     bodyPos = newPos;
     cameraPos = bodyPos + glm::vec3(0.0f, eyeLevel, 0.0f);  // Recalculate the camera position as an offset
-
-    std::cout << "Post-Movement - Eyes: " << cameraPos.y << ", Feet: " << cameraPos.y + playerAABB.min.y << std::endl;
-
     // Jump logic
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && grounded) {
         velocity.y = jumpForce;

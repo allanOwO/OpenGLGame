@@ -421,8 +421,8 @@ void Main::addChunks() {
         std::cout << seed;
     }
     
-    for (int x = -8; x <8; x++) {
-        for (int z = -8; z < 8; z++) {
+    for (int x = -1; x <1; x++) {
+        for (int z = -1; z < 1; z++) {
             glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
                 -Chunk::baseTerrainHeight,
                 static_cast<int>(z * Chunk::chunkSize));
@@ -566,10 +566,13 @@ void Main::raycastBlock() {
             if (localX >= 0 && localX < Chunk::chunkSize &&
                 localY >= 0 && localY < Chunk::chunkHeight &&
                 localZ >= 0 && localZ < Chunk::chunkSize) {
-                Block& block = chunk.blocks[localX][localY][localZ];
-                if (block.type != BlockType::AIR) {
+
+                // Look up the block using the local coordinates
+                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ); 
+                auto blockIt = chunk.blocks.find(blockKey); 
+                if (blockIt != chunk.blocks.end() && blockIt->second != BlockType::AIR) { 
                     // Set highlighted block position
-                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
+                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z)); 
                     hasHighlightedBlock = true;
 
                     // Compute previous block position for normal calculation
@@ -584,26 +587,29 @@ void Main::raycastBlock() {
 }
 
 void Main::placeBlock() {
+
     if (hasHighlightedBlock) {
         glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal
-        glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize); 
+        glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        auto it = chunks.find(chunkPos); 
+        // Look for the chunk in the chunks map
+        auto it = chunks.find(chunkPos);
         if (it != chunks.end()) {
             Chunk& chunk = it->second;
-            // Calculate local coordinates
+
+            // Calculate local coordinates within the chunk
             int localX = static_cast<int>(placePos.x - chunkPos.x);
             int localY = static_cast<int>(placePos.y - chunkPos.y);
             int localZ = static_cast<int>(placePos.z - chunkPos.z);
 
-            // Check bounds and place the block
+            // Check if the local coordinates are within chunk bounds
             if (localX >= 0 && localX < Chunk::chunkSize &&
                 localY >= 0 && localY < Chunk::chunkHeight &&
                 localZ >= 0 && localZ < Chunk::chunkSize) {
-                if (chunk.blocks[localX][localY][localZ].type == BlockType::AIR) {
-                    chunk.setBlock(localX, localY, localZ, BlockType::STONE);
-                }
+
+                // Directly set the block at the calculated local position
+                chunk.setBlock(localX, localY, localZ, BlockType::STONE);
             }
         }
     }
