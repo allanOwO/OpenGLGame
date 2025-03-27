@@ -24,7 +24,6 @@
 class Main
 {
 public:
-
 	//thread count
 	static const size_t MAX_ASYNC_TASKS() {
 		return std::thread::hardware_concurrency();

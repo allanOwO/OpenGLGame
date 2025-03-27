@@ -6,7 +6,6 @@
 
 #include "Main.h"//need for full main deffinition
 
-
 Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR), currentTallestBlock(0),
 		VAO(0), VBO(0), EBO(0) {

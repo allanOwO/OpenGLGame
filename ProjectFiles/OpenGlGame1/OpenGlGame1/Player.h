@@ -7,6 +7,11 @@
 #include<unordered_map>
 #include "Vec3Hash.h"
 
+#define GRAVITY -21.0f//as a downwards force
+#define JUMP_HEIGHT 1.2f
+#define SPRINT_SPEED 1.3f
+#define BASE_SPEED 8.0f
+
 //players bounding box(collsisions)
 struct AABB {
 	glm::vec3 min;
@@ -49,9 +54,7 @@ private:
 	float yaw = -90.0f;//offest at beginign to allign to -z
 	float pitch = 0.0f;
 
-	const float camSpeedBase = 10.0f;
 	const float lookSens = 0.1f;
-
 
 	//mouse movement
 	float lastX = 400, lastY = 300;
@@ -59,9 +62,7 @@ private:
 	//movement
 	glm::vec3 bodyPos;
 	float eyeLevel = 1.6f;
-	float jumpForce = 6.0f;
 	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
-	float gravity = -9.8f; // Gravity strength (tune this) 
 	
 	bool intersects(const AABB& a, const AABB& b) const;
 	AABB playerAABB = { glm::vec3(-0.3f, 0.0f, -0.3f), glm::vec3(0.3f, 1.8f, 0.3f) }; // Example size 

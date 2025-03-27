@@ -68,10 +68,10 @@ void Player::processMouseMovement(GLFWwindow* window, double xpos, double ypos) 
 }
 
 void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
-    float camSpeed = camSpeedBase;
+    float camSpeed = BASE_SPEED;
 
     // Apply gravity
-    velocity.y += gravity * deltaTime;
+    velocity.y += GRAVITY * deltaTime;
 
     // WASD Input
     glm::vec3 moveDir(0.0f);
@@ -81,6 +81,10 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) moveDir -= forward;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) moveDir += right;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) moveDir -= right;
+     
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+        camSpeed *= SPRINT_SPEED;
+    } 
 
     if (glm::length(moveDir) > 0.0f) {
         moveDir = glm::normalize(moveDir);
@@ -92,7 +96,13 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
         velocity.z *= 0.9f;
     }
 
-    // Proposed new position (step-by-step for each axis)
+    // Jump logic 
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && grounded) { 
+        //https://medium.com/%40brazmogu/physics-for-game-dev-a-platformer-physics-cheatsheet-f34b09064558
+        velocity.y = sqrt(2.0f * -GRAVITY * JUMP_HEIGHT);
+    }
+
+    // Proposed new position (step-by-step for each axis) 
     glm::vec3 newPos = bodyPos;
     AABB playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
     grounded = false;
@@ -246,10 +256,9 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     // Update position
     bodyPos = newPos;
     cameraPos = bodyPos + glm::vec3(0.0f, eyeLevel, 0.0f);  // Recalculate the camera position as an offset
-    // Jump logic
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && grounded) {
-        velocity.y = jumpForce;
-    }
+    
+
+    
 }
 
 // Helper function for AABB intersection
