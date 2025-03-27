@@ -27,6 +27,7 @@ public:
 	static constexpr int chunkHeight = 256;
 	static constexpr int maxTerrainHeight = 32;
 	static constexpr int baseTerrainHeight = 64;
+	int currentTallestBlock;//for fustrum culling , avoids it detecting air as in culling view
 	bool isActive = true;
 
 	Chunk(glm::vec3 position, int seed, Main* m = nullptr);//constructor

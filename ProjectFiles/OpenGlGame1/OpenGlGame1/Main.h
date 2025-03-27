@@ -19,9 +19,7 @@
 #include "MeshData.h"
 #include <FastNoiseLite.h>
 #include <glm/vec2.hpp>
-
-
-
+#include "Frustum.h"
 
 class Main
 {
@@ -68,6 +66,7 @@ private:
 	GLFWwindow* window; // Window pointer
 
 	std::unique_ptr<Player> player;  // Use smart pointer for automatic cleanup
+	Frustum frustum;
 
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these

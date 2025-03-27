@@ -366,6 +366,40 @@ void Main::createHighlight() {
     glBindVertexArray(0);
 }
 
+void Main::drawChunks() { 
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
+    for (const auto& pair : chunks) {
+        const glm::vec3& pos = pair.first;
+        const Chunk& chunk = pair.second;
+
+        // Frustum culling 
+        glm::vec3 min = pos;
+        glm::vec3 max = pos + glm::vec3(CHUNK_SIZE, chunk.currentTallestBlock+1, CHUNK_SIZE);
+        if (!frustum.isBoxInFrustum(min, max)) {
+            continue; // Skip chunks outside the frustum 
+        }
+
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
+        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
+
+        glBindVertexArray(chunk.VAO);
+        for (const auto& typePair : chunk.verticesByType) {
+            BlockType type = typePair.first;
+            const auto& indices = chunk.indicesByType.at(type);
+
+            if (indices.empty()) continue;
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, textureMap.at(type));
+            glUniform1i(textureLocation, 0);
+
+            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
+                (void*)(chunk.baseIndicesByType.at(type) * sizeof(unsigned int)));
+        }
+        glBindVertexArray(0);
+    }
+}
+
 void Main::render() {
 
     // set background & clear screen
@@ -376,6 +410,10 @@ void Main::render() {
     //lookat(position, target, up)
     glm::mat4 view = player->getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
+     
+    //whats in current view
+    glm::mat4 viewProj = projection * view; 
+    frustum.update(viewProj); // Update frustum for culling 
 
     //use light shader for light
     lightShader->use();
@@ -442,6 +480,7 @@ void Main::render() {
     }
 }
 
+
 void Main::addChunks() {
 
    
@@ -475,7 +514,6 @@ void Main::generateChunk(const glm::vec3& pos) {
     }
 }
 
-// In Main.cpp
 void Main::generateChunkAsync(const glm::vec3& pos) {
     // Launch async task to generate the chunk
     chunkGenerationFutures[pos] = std::async(std::launch::async, [this, pos]() {
@@ -600,32 +638,7 @@ Chunk* Main::getChunk(const glm::vec3& pos) {
     return (it != chunks.end()) ? &it->second : nullptr;
 } 
 
-void Main::drawChunks() {
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
-    for (const auto& pair : chunks) { 
-        const glm::vec3& pos = pair.first;
-        const Chunk& chunk = pair.second;
 
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
-        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model)); 
-
-        glBindVertexArray(chunk.VAO);
-        for (const auto& typePair : chunk.verticesByType) {
-            BlockType type = typePair.first;
-            const auto& indices = chunk.indicesByType.at(type);
-
-            if (indices.empty()) continue;
-
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, textureMap.at(type));
-            glUniform1i(textureLocation, 0);
-
-            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
-                (void*)(chunk.baseIndicesByType.at(type) * sizeof(unsigned int))); 
-        }
-        glBindVertexArray(0); 
-    }
-}
 
 void Main::getTextures() {
 
@@ -824,6 +837,7 @@ void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
                 chunkMeshFutures.erase(it);
                 activeAsyncTasks--;
 
+                /*
                 {
                     std::lock_guard<std::mutex> lock(logMutex);
                     std::cout << "Completed async task for chunk " << glm::to_string(chunk.chunkPosition)
@@ -834,6 +848,7 @@ void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
                     }
                     std::cout << std::endl;
                 }
+                */
 
                 chunk.verticesByType = std::move(newMesh.verticesByType);
                 chunk.indicesByType = std::move(newMesh.indicesByType);
@@ -956,7 +971,7 @@ void Main::processChunkMeshingInOrder() {
 
     std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Single lock for all chunk operations
     int processedChunks = 0;
-    const int maxChunksPerFrame = 10;
+    const int maxChunksPerFrame = 20;//needs to be >1 as 1 is always used for current chunk
 
     //pos in chunks (eg 0,0,1)
     glm::ivec3 playerChunkPos = glm::ivec3(
@@ -995,6 +1010,7 @@ void Main::processChunkMeshingInOrder() {
         }
     }  
 }
+
 void Main::run() {
 
     createCube();

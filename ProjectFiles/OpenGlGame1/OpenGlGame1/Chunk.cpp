@@ -8,7 +8,7 @@
 
 
 Chunk::Chunk(glm::vec3 position,int seed, Main* m)
-	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR),
+	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR), currentTallestBlock(0),
 		VAO(0), VBO(0), EBO(0) {
 
 	size_t maxBlocks = chunkSize * chunkHeight * chunkSize; // Worst case: fully solid
@@ -170,11 +170,16 @@ MeshData Chunk::generateMeshData() {
 	cacheNeighbors();
 	MeshData meshData;
 
+	int localMaxHeight = 0; // Maximum Y value of non-air blocks in this chunk
+
 	for (int x = 0; x < chunkSize; x++) {
 		for (int y = 0; y < chunkHeight; y++) {
 			for (int z = 0; z < chunkSize; z++) {
 				size_t index = getBlockIndex(x, y, z);
 				if (blocks[index] == BlockType::AIR) continue; // Skip air blocks
+
+				// Update max height
+				localMaxHeight = std::max(localMaxHeight, y); 
 
 				// Basic occlusion culling: skip fully surrounded blocks
 				bool isSurrounded = true;
@@ -199,6 +204,7 @@ MeshData Chunk::generateMeshData() {
 			}
 		}
 	}
+	currentTallestBlock = localMaxHeight;
 	return meshData;
 }
 
@@ -354,7 +360,15 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 void Chunk::setBlock(int x, int y, int z, BlockType type) {
 	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return;//if outside chunk
 
+	std::cout << currentTallestBlock;
 	size_t index = getBlockIndex(x, y, z); 
+
+	//technically incorrect as there could be >1 blocks at max height
+	if (type == BlockType::AIR)//if broken was tallest, lower tallest block to broken
+		currentTallestBlock = std::min(currentTallestBlock, y - 1);
+	else
+		currentTallestBlock = std::max(currentTallestBlock, y);
+
 	blocks[index] = type; 
 	fullRebuildNeeded = true;  
 }
