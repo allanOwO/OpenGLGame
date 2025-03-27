@@ -760,7 +760,12 @@ void Main::raycastBlock() {
 void Main::placeBlock() {
 
     if (hasHighlightedBlock) {
-        glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal
+        glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal    
+
+        if (player->blockIntersects(placePos)) {
+            return; // Cancel placement if a player is in the way
+        }   
+       
         glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 

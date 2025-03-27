@@ -11,6 +11,8 @@
 struct AABB {
 	glm::vec3 min;
 	glm::vec3 max;
+
+	AABB(const glm::vec3& min, const glm::vec3& max) : min(min), max(max) {} 
 };
  
 class Player
@@ -27,7 +29,9 @@ public:
 	glm::vec3 getCameraFront() const { return cameraFront; }
 	glm::vec3 getCameraUp() const { return cameraUp; }
 	glm::mat4 getViewMatrix() const; 
-	 
+
+	bool blockIntersects(const glm::vec3& blockPos) const;
+	
 
 private:
 	void processMouseMovement(GLFWwindow* window, double xpos, double ypos);
@@ -58,8 +62,9 @@ private:
 	float jumpForce = 6.0f;
 	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
 	float gravity = -9.8f; // Gravity strength (tune this) 
-	AABB playerAABB = { glm::vec3(-0.3f, 0.0f, -0.3f), glm::vec3(0.3f, 1.8f, 0.3f) }; // Example size
-	bool intersects(const AABB& a, const AABB& b);
+	
+	bool intersects(const AABB& a, const AABB& b) const;
+	AABB playerAABB = { glm::vec3(-0.3f, 0.0f, -0.3f), glm::vec3(0.3f, 1.8f, 0.3f) }; // Example size 
 	bool grounded;
 
 };

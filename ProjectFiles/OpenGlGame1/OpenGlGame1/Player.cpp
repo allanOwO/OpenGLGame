@@ -253,10 +253,19 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
 }
 
 // Helper function for AABB intersection
-bool Player::intersects(const AABB& a, const AABB& b) {
+bool Player::intersects(const AABB& a, const AABB& b) const {
     return (a.min.x < b.max.x && a.max.x > b.min.x &&
         a.min.y < b.max.y && a.max.y > b.min.y &&
         a.min.z < b.max.z && a.max.z > b.min.z);
+}
+
+bool Player::blockIntersects(const glm::vec3& blockPos) const { 
+    // Create the block's AABB (assuming the block is 1x1x1)
+    AABB blockAABB(blockPos, blockPos + glm::vec3(1.0f, 1.0f, 1.0f)); 
+    AABB playerBox = { bodyPos + playerAABB.min, bodyPos + playerAABB.max };
+
+    // Use the member function 'intersects' to compare the block's AABB with the player's AABB
+    return intersects(blockAABB, playerBox); 
 }
 
 

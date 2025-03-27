@@ -371,6 +371,13 @@ void Chunk::setBlock(int x, int y, int z, BlockType type) {
 
 	blocks[index] = type; 
 	fullRebuildNeeded = true;  
+
+	// Notify neighboring chunks if a block is placed at the edge
+	if (x == chunkSize - 1 && neighbors[0]) neighbors[0]->fullRebuildNeeded = true;//x+
+	if (x == 0 && neighbors[1]) neighbors[1]->fullRebuildNeeded = true;//x-
+
+	if (z == chunkSize - 1 && neighbors[2]) neighbors[2]->fullRebuildNeeded = true;//z+
+	if (z == 0 && neighbors[3]) neighbors[3]->fullRebuildNeeded = true;//z-
 }
 
 // Helper to get the index in the 1D array from 3D coordinates
