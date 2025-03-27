@@ -6,19 +6,15 @@
 #include<GLFW/glfw3.h>
 #include "Vec3Hash.h"
 #include <unordered_map>
-
-enum class BlockType {
-	AIR,
-	DIRT,
-	STONE,
-	GRASS,
-	WATER
-};
+#include "BlockType.h"
+#include "MeshData.h"
 
 struct Block
 {
 	BlockType type;
 };
+
+
 
 class Main;//forward declaration
 
@@ -31,6 +27,7 @@ public:
 	static constexpr int chunkHeight = 256;
 	static constexpr int maxTerrainHeight = 32;
 	static constexpr int baseTerrainHeight = 64;
+	bool isActive = true;
 
 	Chunk(glm::vec3 position, int seed, Main* m = nullptr);//constructor
 	~Chunk();
@@ -80,9 +77,10 @@ public:
 		return *this;
 	} 
 
-	void generateMesh();//creates chunk mesh
+	//void generateMesh();//creates chunk mesh
+	MeshData generateMeshData();
 	void setBlock(int x, int y, int z, BlockType type); 
-	void updateMesh();
+	//void updateMesh();
 
 	unsigned int VBO, VAO, EBO;
 
@@ -92,13 +90,15 @@ public:
 	glm::vec3 chunkPosition;
 
 	std::unordered_map<glm::ivec3, BlockType, IVec3Hash> blocks; 
+	bool fullRebuildNeeded = true;
+
+	void initializeBuffers(); // New method to initialize OpenGL buffers 
 
 private:
 	
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos); 
 	bool isBlockSolid(int x, int y, int z);
-
-	std::vector<glm::ivec3> dirtyBlocks; // Add this 
-	bool fullRebuildNeeded = true; // For initial load 
+ 
+	
 };
 

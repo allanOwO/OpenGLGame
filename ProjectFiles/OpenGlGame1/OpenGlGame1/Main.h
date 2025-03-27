@@ -14,11 +14,20 @@
 
 #include "Player.h"
 #include "Vec3Hash.h"
+#include <future>//threading
+#include <thread>
+#include "MeshData.h"
+
 
 
 class Main
 {
 public:
+
+	static const size_t MAX_ASYNC_TASKS = 8; 
+	size_t activeAsyncTasks = 0; // Track running tasks
+	std::recursive_mutex chunksMutex; 
+	std::mutex logMutex;
 	Main();
 	~Main();
 	float width, height;
@@ -56,11 +65,24 @@ private:
 	std::map<BlockType, GLuint> textureMap;
 
 	//chunk stuff
+	//map to track async tasks for each chunk by its position. 
+	std::unordered_map<glm::vec3, std::future<MeshData>, Vec3Hash> chunkMeshFutures;  
+	std::unordered_map<glm::vec3, std::future<Chunk>, Vec3Hash> chunkGenerationFutures; // For async chunk generation 
 	std::unordered_map<glm::vec3,Chunk,Vec3Hash> chunks;
+
+
+
 	std::vector<glm::mat4> chunkModels;//array of chunk models
+	void updateChunks(const glm::vec3& playerPosition);
+	void generateChunk(const glm::vec3& pos);
+	void generateChunkAsync(const glm::vec3& pos);
+	void tryApplyChunkGeneration();
 	void addChunks();
 	void drawChunks();
 	int seed = -1;
+	void updateChunkMeshAsync(Chunk& chunk);
+	void tryApplyChunkMeshUpdate(Chunk& chunk);
+	
 
 	//fps tracking & timing
 	float lastFPSTime = 0.0f; // Time of the last FPS update

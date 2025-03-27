@@ -7,8 +7,12 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
-#include<random>
-#include<memory>
+#include <random>
+#include <memory>
+#include <unordered_set>
+
+#define CHUNK_SIZE 16
+
 
 
 
@@ -415,11 +419,7 @@ void Main::render() {
 
 void Main::addChunks() {
 
-    if (seed == -1) {
-        std::random_device rd;
-        seed = rd();
-        std::cout << seed;
-    }
+   
     
     for (int x = -1; x <1; x++) {
         for (int z = -1; z < 1; z++) {
@@ -428,7 +428,7 @@ void Main::addChunks() {
                 static_cast<int>(z * Chunk::chunkSize));
             // Create a new chunk at (x, 0, z), gen mesh
             chunks.emplace(chunkPos,Chunk(chunkPos,seed,this));
-            chunks.at(chunkPos).generateMesh();
+            updateChunkMeshAsync(chunks.at(chunkPos));
 
             // Add a new model matrix for this chunk (initially an identity matrix)
             chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
@@ -437,13 +437,124 @@ void Main::addChunks() {
 
 }
 
+void Main::generateChunk(const glm::vec3& pos) {
+
+
+    // Create a new chunk at (x, 0, z), gen mesh
+    chunks.emplace(pos, Chunk(pos, seed, this));
+    chunks.at(pos).isActive = true; 
+
+    chunkModels.clear();
+    for (const auto& pair : chunks) { 
+        chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), pair.first)); 
+    }
+}
+
+// In Main.cpp
+void Main::generateChunkAsync(const glm::vec3& pos) {
+    // Launch async task to generate the chunk
+    chunkGenerationFutures[pos] = std::async(std::launch::async, [this, pos]() {
+        Chunk chunk(pos, seed, this);
+        return chunk;
+        });
+}
+
+void Main::tryApplyChunkGeneration() {
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+    for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
+        if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            
+            Chunk chunk = it->second.get();
+            glm::vec3 pos = chunk.chunkPosition;
+
+            chunk.initializeBuffers(); 
+
+            chunks.emplace(pos, std::move(chunk));
+            chunkModels.clear();
+            for (const auto& pair : chunks) {
+                chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), pair.first));
+            }
+
+            it = chunkGenerationFutures.erase(it);
+
+            
+        }
+        else {
+            ++it;
+        }
+    }
+}
+
+void Main::updateChunks(const glm::vec3& playerPosition) {
+    const int renderDistance = 4; // Increased to preload more chunks
+
+    // Calculate the player's chunk position in chunk coordinates
+    glm::ivec3 playerChunkPos = glm::ivec3(
+        floor(playerPosition.x / CHUNK_SIZE), 
+        0, // Y is fixed at 0 for chunk coordinates
+        floor(playerPosition.z / CHUNK_SIZE)
+    );
+
+    std::cout << "Player chunk pos: " << playerChunkPos.x << " " << playerChunkPos.z << "\n";
+
+    // Use a vector of pairs to store chunk positions and their distances
+    std::vector<std::pair<glm::ivec3, float> > chunkPositions;
+    for (int x = -renderDistance; x <= renderDistance; x++) {
+        for (int z = -renderDistance; z <= renderDistance; z++) {
+            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z); // Offset in chunk coordinates
+            glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
+            // Calculate distance to prioritize closer chunks
+            float distance = glm::length(glm::vec3(realChunkPos.x, 0, realChunkPos.z) - glm::vec3(playerPosition.x, 0, playerPosition.z));
+            chunkPositions.push_back(std::make_pair(chunkPos, distance));
+        }
+    }
+
+    // Sort by distance to prioritize closer chunks
+    std::sort(chunkPositions.begin(), chunkPositions.end(),
+        [](const std::pair<glm::ivec3, float>& a, const std::pair<glm::ivec3, float>& b) {
+            return a.second < b.second;
+        });
+
+    std::unordered_set<glm::ivec3, IVec3Hash> loadedChunks;
+    int chunksGeneratedThisFrame = 0;
+    const int maxChunksGeneratedPerFrame = 1; // Throttle generation
+    for (std::vector<std::pair<glm::ivec3, float> >::const_iterator it = chunkPositions.begin(); it != chunkPositions.end(); ++it) {
+        if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
+        glm::ivec3 chunkPos = it->first;
+        float distance = it->second;
+        loadedChunks.insert(chunkPos);
+        glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
+        if (chunks.find(realChunkPos) == chunks.end() && chunkGenerationFutures.find(realChunkPos) == chunkGenerationFutures.end()) {
+            generateChunkAsync(realChunkPos);
+            chunksGeneratedThisFrame++;
+        }
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+    for (std::unordered_map<glm::vec3, Chunk, Vec3Hash>::iterator pair = chunks.begin(); pair != chunks.end(); ++pair) {
+        // Convert world position to chunk coordinates for comparison
+        glm::ivec3 chunkKey = glm::ivec3(
+            pair->first.x / CHUNK_SIZE,
+            0,
+            pair->first.z / CHUNK_SIZE
+        );
+        if (loadedChunks.find(chunkKey) == loadedChunks.end()) {
+            pair->second.isActive = false;
+        }
+        else {
+            pair->second.isActive = true;
+        }
+    }
+}
+
 Chunk* Main::getChunk(const glm::vec3& pos) {
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Keep this for external access
     auto it = chunks.find(pos);
     return (it != chunks.end()) ? &it->second : nullptr;
 } 
 
 void Main::drawChunks() {
-    
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
     for (const auto& pair : chunks) { 
         const glm::vec3& pos = pair.first;
         const Chunk& chunk = pair.second;
@@ -641,21 +752,176 @@ void Main::breakBlock() {
     }
 }
 
+// Launch an asynchronous mesh update for a chunk.
+void Main::updateChunkMeshAsync(Chunk& chunk) { 
+
+
+    if (chunk.fullRebuildNeeded && chunk.isActive && activeAsyncTasks < MAX_ASYNC_TASKS) {
+        // Launch an async task that calls generateMeshData.
+        chunkMeshFutures[chunk.chunkPosition] = std::async(std::launch::async, [&chunk]() {
+            return chunk.generateMeshData();
+            });
+        // Reset the flags on the chunk so we don’t launch it again until needed.
+        chunk.fullRebuildNeeded = false;
+        activeAsyncTasks++; 
+    }
+}
+
+// Check if an asynchronous mesh update for the given chunk is ready,and if so, update its OpenGL buffers.
+void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
+    auto it = chunkMeshFutures.find(chunk.chunkPosition);
+    if (it != chunkMeshFutures.end()) {
+        if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            try {
+                MeshData newMesh = it->second.get();
+                chunkMeshFutures.erase(it);
+                activeAsyncTasks--;
+
+                {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cout << "Completed async task for chunk " << glm::to_string(chunk.chunkPosition)
+                        << ". Active tasks: " << activeAsyncTasks << std::endl;
+                    std::cout << "Mesh data: " << newMesh.verticesByType.size() << " types, ";
+                    for (const auto& pair : newMesh.indicesByType) {
+                        std::cout << pair.second.size() << " indices for type " << static_cast<int>(pair.first) << ", ";
+                    }
+                    std::cout << std::endl;
+                }
+
+                chunk.verticesByType = std::move(newMesh.verticesByType);
+                chunk.indicesByType = std::move(newMesh.indicesByType);
+                chunk.baseIndicesByType = std::move(newMesh.baseIndicesByType);
+
+                std::vector<float> allVertices;
+                std::vector<unsigned int> allIndices;
+                unsigned int vertexOffset = 0;
+                unsigned int indexOffset = 0;
+                for (auto& pair : chunk.verticesByType) {
+                    BlockType type = pair.first;
+                    chunk.baseIndicesByType[type] = indexOffset;
+                    allVertices.insert(allVertices.end(), pair.second.begin(), pair.second.end());
+                    for (unsigned int idx : chunk.indicesByType[type]) {
+                        allIndices.push_back(idx + vertexOffset / 11);
+                    }
+                    vertexOffset += pair.second.size();
+                    indexOffset += chunk.indicesByType[type].size();
+                }
+
+                // Check if buffers are valid
+                if (chunk.VAO == 0 || chunk.VBO == 0 || chunk.EBO == 0) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "Invalid VAO/VBO/EBO for chunk " << glm::to_string(chunk.chunkPosition) << std::endl;
+                    return;
+                }
+
+                glBindVertexArray(chunk.VAO);
+                GLenum error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBindVertexArray: " << error << std::endl;
+                }
+
+                glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBindBuffer(GL_ARRAY_BUFFER): " << error << std::endl;
+                }
+
+                glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBufferData(GL_ARRAY_BUFFER): " << error << std::endl;
+                }
+
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk.EBO);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBindBuffer(GL_ELEMENT_ARRAY_BUFFER): " << error << std::endl;
+                }
+
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBufferData(GL_ELEMENT_ARRAY_BUFFER): " << error << std::endl;
+                }
+
+                // Changed normals to GL_FLOAT for compatibility
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
+                glEnableVertexAttribArray(0);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after setting attribute 0: " << error << std::endl;
+                }
+
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
+                glEnableVertexAttribArray(1);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after setting attribute 1: " << error << std::endl;
+                }
+
+                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
+                glEnableVertexAttribArray(2);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after setting attribute 2: " << error << std::endl;
+                }
+
+                glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float)));
+                glEnableVertexAttribArray(3);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after setting attribute 3: " << error << std::endl;
+                }
+
+                glBindVertexArray(0);
+                error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    std::lock_guard<std::mutex> lock(logMutex);
+                    std::cerr << "OpenGL Error after glBindVertexArray(0): " << error << std::endl;
+                }
+
+                chunk.fullRebuildNeeded = false;
+            }
+
+
+            catch (const std::exception& e) {
+                std::lock_guard<std::mutex> lock(logMutex);
+                std::cerr << "Error retrieving future for chunk " << glm::to_string(chunk.chunkPosition)
+                    << ": " << e.what() << std::endl;
+                chunkMeshFutures.erase(it);
+                activeAsyncTasks--;
+            }
+        }
+    }
+}
 
 void Main::run() {
+
+    if (seed == -1) {
+        std::random_device rd;
+        seed = rd();
+        std::cout << seed;
+    }
 
     createCube();
     createLight();
 
     getTextures(); 
-    addChunks(); 
-
-
+    //addChunks(); 
     createShaders();
     createHighlight();
 
 
-    player->spawn(glm::vec3(0,100,0));
+    player->spawn(glm::vec3(10,200,10));
     lastFrame = glfwGetTime();
 
     // Main loop
@@ -665,10 +931,26 @@ void Main::run() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        //input
-        player->update(deltaTime,chunks);
-        processInput(window);
-        
+        updateChunks(player->getCameraPos());
+        tryApplyChunkGeneration();
+        player->update(deltaTime, chunks); 
+        processInput(window); 
+
+        {
+            std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Single lock for all chunk operations
+            int processedChunks = 0;
+            const int maxChunksPerFrame = 1;
+            for (auto& pair : chunks) {
+                if (processedChunks >= maxChunksPerFrame) break; 
+                Chunk& chunk = pair.second;
+                if (chunk.isActive) {
+                    if (chunk.fullRebuildNeeded) {
+                        updateChunkMeshAsync(chunk);
+                    }
+                    tryApplyChunkMeshUpdate(chunk);
+                }
+            }
+        } // Mutex unlocked here
 
         render();
         doFps();

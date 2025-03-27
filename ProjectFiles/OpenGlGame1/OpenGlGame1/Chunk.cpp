@@ -52,17 +52,37 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 			}
 		}
 	}
-	
-	std::cout << "Blocks: " << blocks.size() << " (~" << blocks.size() * 32 / 1024 << " KB)" << std::endl;
-
 }
 
 Chunk::~Chunk() {
-	glDeleteVertexArrays(1, &VAO);
-	glDeleteBuffers(1, &VBO);
-	glDeleteBuffers(1, &EBO);
+	if (VAO != 0) glDeleteVertexArrays(1, &VAO);
+	if (VBO != 0) glDeleteBuffers(1, &VBO); 
+	if (EBO != 0) glDeleteBuffers(1, &EBO); 
 }
 
+void Chunk::initializeBuffers() {
+	if (VAO != 0 || VBO != 0 || EBO != 0) {
+		// Already initialized
+		return;
+	}
+
+	glGenVertexArrays(1, &VAO);
+	glGenBuffers(1, &VBO);
+	glGenBuffers(1, &EBO);
+
+	glBindVertexArray(VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBindVertexArray(0);
+
+	GLenum error = glGetError();
+	if (error != GL_NO_ERROR) {
+		std::cerr << "OpenGL Error after initializing buffers for chunk "
+			<< ": " << error << std::endl;
+	}
+}
+
+/*
 void Chunk::generateMesh() {
 
 	verticesByType.clear();
@@ -132,7 +152,33 @@ void Chunk::generateMesh() {
 
 	glBindVertexArray(0);
 }
+*/
 
+MeshData Chunk::generateMeshData() {
+	MeshData data;
+
+	// Clear existing data.
+	data.verticesByType.clear();
+	data.indicesByType.clear();
+	data.baseIndicesByType.clear();
+
+	//Iterate over all blocks and generate faces (skipping AIR)
+    for (const auto& b : blocks) {
+        if (b.second == BlockType::AIR)
+            continue;
+        generateBlockFaces(data.verticesByType[b.second], data.indicesByType[b.second], b.first); 
+    }
+
+	//Now, calculate base indices offsets.
+	unsigned int indexOffset = 0;
+	for (auto& pair : data.verticesByType) { 
+		BlockType type = pair.first; 
+		data.baseIndicesByType[type] = indexOffset; 
+		indexOffset += data.indicesByType[type].size(); 
+	}
+
+	return data;
+}
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos) {
 
@@ -287,9 +333,10 @@ void Chunk::setBlock(int x, int y, int z, BlockType type) {
 		blocks.emplace(pos, type);    
 	}
 
-	generateMesh();
+	fullRebuildNeeded = true;
 }
 
+/*
 void Chunk::updateMesh() {
 
 	//first chunk build
@@ -340,3 +387,4 @@ void Chunk::updateMesh() {
 	 
 	dirtyBlocks.clear();  
 }
+*/
