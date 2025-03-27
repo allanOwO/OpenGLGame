@@ -12,15 +12,15 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
+#define RENDER_DISTANCE 8
 
 
 
 
-Main::Main() : window(nullptr),width(1280),height(720),player(nullptr){
+Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
+                , isInitialLoading(true), currentLoadingRadius(1), maxLoadingRadius(RENDER_DISTANCE) {
 
     init();
-  
-
     player = std::make_unique<Player>(window);  // Use smart pointer for automatic cleanup;//give window to player
 }
 
@@ -470,11 +470,9 @@ void Main::tryApplyChunkGeneration() {
             chunk.initializeBuffers(); 
 
             chunks.emplace(pos, std::move(chunk));
-            chunkModels.clear();
-            for (const auto& pair : chunks) {
-                chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), pair.first));
-            }
-
+            
+            chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),pos));
+            
             it = chunkGenerationFutures.erase(it);
 
             
@@ -486,25 +484,22 @@ void Main::tryApplyChunkGeneration() {
 }
 
 void Main::updateChunks(const glm::vec3& playerPosition) {
-    const int renderDistance = 4; // Increased to preload more chunks
-
     // Calculate the player's chunk position in chunk coordinates
     glm::ivec3 playerChunkPos = glm::ivec3(
-        floor(playerPosition.x / CHUNK_SIZE), 
+        floor(playerPosition.x / CHUNK_SIZE),
         0, // Y is fixed at 0 for chunk coordinates
         floor(playerPosition.z / CHUNK_SIZE)
     );
 
-    std::cout << "Player chunk pos: " << playerChunkPos.x << " " << playerChunkPos.z << "\n";
-
     // Use a vector of pairs to store chunk positions and their distances
     std::vector<std::pair<glm::ivec3, float> > chunkPositions;
-    for (int x = -renderDistance; x <= renderDistance; x++) {
-        for (int z = -renderDistance; z <= renderDistance; z++) {
+    int effectiveRenderDistance = isInitialLoading ? currentLoadingRadius : RENDER_DISTANCE;
+    for (int x = -effectiveRenderDistance; x <= effectiveRenderDistance; x++) {
+        for (int z = -effectiveRenderDistance; z <= effectiveRenderDistance; z++) {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z); // Offset in chunk coordinates
             glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
-            // Calculate distance to prioritize closer chunks
-            float distance = glm::length(glm::vec3(realChunkPos.x, 0, realChunkPos.z) - glm::vec3(playerPosition.x, 0, playerPosition.z));
+            // Use Manhattan distance for faster sorting (no square root needed)
+            float distance = std::abs(realChunkPos.x - playerPosition.x) + std::abs(realChunkPos.z - playerPosition.z);
             chunkPositions.push_back(std::make_pair(chunkPos, distance));
         }
     }
@@ -517,7 +512,7 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
 
     std::unordered_set<glm::ivec3, IVec3Hash> loadedChunks;
     int chunksGeneratedThisFrame = 0;
-    const int maxChunksGeneratedPerFrame = 1; // Throttle generation
+    const int maxChunksGeneratedPerFrame = isInitialLoading ? 2 : 1; // Load 2 chunks per frame during initial loading
     for (std::vector<std::pair<glm::ivec3, float> >::const_iterator it = chunkPositions.begin(); it != chunkPositions.end(); ++it) {
         if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
         glm::ivec3 chunkPos = it->first;
@@ -530,9 +525,36 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
         }
     }
 
+    // Update the loading radius
+    if (isInitialLoading) {
+        std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+        // Check if all chunks within the current radius are loaded
+        int expectedChunks = (2 * currentLoadingRadius + 1) * (2 * currentLoadingRadius + 1);
+        int loadedChunksCount = 0;
+        for (const auto& pair : chunks) {
+            glm::ivec3 chunkKey = glm::ivec3(
+                pair.first.x / CHUNK_SIZE,
+                0,
+                pair.first.z / CHUNK_SIZE
+            );
+            int dx = std::abs(chunkKey.x - playerChunkPos.x);
+            int dz = std::abs(chunkKey.z - playerChunkPos.z);
+            if (dx <= currentLoadingRadius && dz <= currentLoadingRadius) {
+                loadedChunksCount++;
+            }
+        }
+        if (loadedChunksCount >= expectedChunks) {
+            currentLoadingRadius++;
+            if (currentLoadingRadius > maxLoadingRadius) {
+                isInitialLoading = false;
+                std::cout << "Initial loading complete! All chunks within render distance loaded." << std::endl;
+            }
+        }
+    }
+
+    // Mark chunks as active/inactive
     std::lock_guard<std::recursive_mutex> lock(chunksMutex);
     for (std::unordered_map<glm::vec3, Chunk, Vec3Hash>::iterator pair = chunks.begin(); pair != chunks.end(); ++pair) {
-        // Convert world position to chunk coordinates for comparison
         glm::ivec3 chunkKey = glm::ivec3(
             pair->first.x / CHUNK_SIZE,
             0,
@@ -931,6 +953,12 @@ void Main::run() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
+        // Cap deltaTime to prevent large spikes (e.g., max 1/30 seconds)
+        const float maxDeltaTime = 1.0f / 60.0f; // 30 FPS minimum
+        if (deltaTime > maxDeltaTime) {
+            deltaTime = maxDeltaTime;
+        }
+         
         updateChunks(player->getCameraPos());
         tryApplyChunkGeneration();
         player->update(deltaTime, chunks); 

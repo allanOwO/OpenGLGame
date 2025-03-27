@@ -155,29 +155,33 @@ void Chunk::generateMesh() {
 */
 
 MeshData Chunk::generateMeshData() {
-	MeshData data;
+	MeshData meshData;
+	for (std::unordered_map<glm::ivec3, BlockType, IVec3Hash>::const_iterator blockIt = blocks.begin(); blockIt != blocks.end(); ++blockIt) {
+		if (blockIt->second == BlockType::AIR) continue; // Skip air blocks
+		glm::ivec3 pos = blockIt->first;
 
-	// Clear existing data.
-	data.verticesByType.clear();
-	data.indicesByType.clear();
-	data.baseIndicesByType.clear();
+		// Basic occlusion culling: skip fully surrounded blocks
+		bool isSurrounded = true;
+		for (int dx = -1; dx <= 1; dx += 2) {
+			if (!isBlockSolid(pos.x + dx, pos.y, pos.z)) { isSurrounded = false; break; }
+		}
+		if (isSurrounded) {
+			for (int dy = -1; dy <= 1; dy += 2) {
+				if (!isBlockSolid(pos.x, pos.y + dy, pos.z)) { isSurrounded = false; break; }
+			}
+		}
+		if (isSurrounded) {
+			for (int dz = -1; dz <= 1; dz += 2) {
+				if (!isBlockSolid(pos.x, pos.y, pos.z + dz)) { isSurrounded = false; break; }
+			}
+		}
+		if (isSurrounded) continue; // Skip fully occluded blocks
 
-	//Iterate over all blocks and generate faces (skipping AIR)
-    for (const auto& b : blocks) {
-        if (b.second == BlockType::AIR)
-            continue;
-        generateBlockFaces(data.verticesByType[b.second], data.indicesByType[b.second], b.first); 
-    }
-
-	//Now, calculate base indices offsets.
-	unsigned int indexOffset = 0;
-	for (auto& pair : data.verticesByType) { 
-		BlockType type = pair.first; 
-		data.baseIndicesByType[type] = indexOffset; 
-		indexOffset += data.indicesByType[type].size(); 
+		std::vector<float>& vertices = meshData.verticesByType[blockIt->second];
+		std::vector<unsigned int>& indices = meshData.indicesByType[blockIt->second];
+		generateBlockFaces(vertices, indices, pos);
 	}
-
-	return data;
+	return meshData;
 }
 
 void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos) {

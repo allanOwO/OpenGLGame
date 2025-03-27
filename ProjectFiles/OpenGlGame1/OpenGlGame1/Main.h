@@ -70,6 +70,10 @@ private:
 	std::unordered_map<glm::vec3, std::future<Chunk>, Vec3Hash> chunkGenerationFutures; // For async chunk generation 
 	std::unordered_map<glm::vec3,Chunk,Vec3Hash> chunks;
 
+	bool isInitialLoading; // Flag to track initial loading phase 
+	int currentLoadingRadius; // Current radius for loading chunks 
+	const int maxLoadingRadius; // Maximum radius (set to RENDER_DISTANCE) 
+
 
 
 	std::vector<glm::mat4> chunkModels;//array of chunk models
