@@ -124,10 +124,9 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
 
 
-                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ);
-                                auto block = chunk.blocks.find(blockKey); 
+                                size_t index = chunk.getBlockIndex(localX, localY, localZ);
 
-                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
+                                if (chunk.blocks[index] != BlockType::AIR) {
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
@@ -171,10 +170,9 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
 
-                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ);
-                                auto block = chunk.blocks.find(blockKey);
+                                size_t index = chunk.getBlockIndex(localX, localY, localZ);
 
-                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
+                                if (chunk.blocks[index] != BlockType::AIR) { 
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
@@ -218,10 +216,9 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
                                 localY >= 0 && localY < Chunk::chunkHeight &&
                                 localZ >= 0 && localZ < Chunk::chunkSize) {
 
-                                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ); 
-                                auto block = chunk.blocks.find(blockKey); 
-                                 
-                                if (block != chunk.blocks.end() && block->second != BlockType::AIR) {
+                                size_t index = chunk.getBlockIndex(localX, localY, localZ);
+
+                                if (chunk.blocks[index] != BlockType::AIR) { 
                                     AABB blockBox = {
                                         chunkPos + glm::vec3(localX, localY, localZ),
                                         chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)

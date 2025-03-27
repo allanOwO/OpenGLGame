@@ -80,6 +80,9 @@ public:
 	//void generateMesh();//creates chunk mesh
 	MeshData generateMeshData();
 	void setBlock(int x, int y, int z, BlockType type); 
+	// Helper to get the index in the 1D array from 3D coordinates
+	size_t getBlockIndex(int x, int y, int z) const;
+
 	//void updateMesh();
 
 	unsigned int VBO, VAO, EBO;
@@ -89,7 +92,7 @@ public:
 	std::map<BlockType, unsigned int> baseIndicesByType; // Track base index per type 
 	glm::vec3 chunkPosition;
 
-	std::unordered_map<glm::ivec3, BlockType, IVec3Hash> blocks; 
+	std::vector<BlockType> blocks;//dense array, uses more ram, quicker lookup  
 	bool fullRebuildNeeded = true;
 
 	void initializeBuffers(); // New method to initialize OpenGL buffers 
@@ -98,7 +101,8 @@ private:
 	
 	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos); 
 	bool isBlockSolid(int x, int y, int z);
+	void cacheNeighbors();
  
-	
+	Chunk* neighbors[4]; // +X, -X, +Z, -Z 
 };
 

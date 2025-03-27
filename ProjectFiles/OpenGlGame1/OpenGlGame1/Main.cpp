@@ -24,6 +24,18 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
     init();
     player = std::make_unique<Player>(window);  // Use smart pointer for automatic cleanup;//give window to player
 
+
+
+    if (seed == -1) {
+        std::random_device rd;
+        seed = rd();
+        std::cout << seed;
+    }
+    //create noise for world gen
+    noiseGen.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
+    noiseGen.SetSeed(seed);
+
     int range = CHUNK_SIZE * RENDER_DISTANCE;
 
     for (float x = -range; x < range; x++) {
@@ -714,9 +726,9 @@ void Main::raycastBlock() {
                 localZ >= 0 && localZ < Chunk::chunkSize) {
 
                 // Look up the block using the local coordinates
-                glm::ivec3 blockKey = glm::ivec3(localX, localY, localZ); 
-                auto blockIt = chunk.blocks.find(blockKey); 
-                if (blockIt != chunk.blocks.end() && blockIt->second != BlockType::AIR) { 
+                size_t index = chunk.getBlockIndex(localX, localY, localZ);
+                  
+                if (chunk.blocks[index] != BlockType::AIR) { 
                     // Set highlighted block position
                     highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z)); 
                     hasHighlightedBlock = true;
@@ -791,7 +803,7 @@ void Main::breakBlock() {
 void Main::updateChunkMeshAsync(Chunk& chunk) { 
 
 
-    if (chunk.fullRebuildNeeded && chunk.isActive && activeAsyncTasks < MAX_ASYNC_TASKS) {
+    if (chunk.fullRebuildNeeded && chunk.isActive && activeAsyncTasks < MAX_ASYNC_TASKS()) {
         // Launch an async task that calls generateMeshData.
         chunkMeshFutures[chunk.chunkPosition] = std::async(std::launch::async, [&chunk]() {
             return chunk.generateMeshData();
@@ -939,17 +951,51 @@ void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
     }
 }
 
-void Main::run() {
 
-    if (seed == -1) {
-        std::random_device rd;
-        seed = rd();
-        std::cout << seed;
+void Main::processChunkMeshingInOrder() {
+
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Single lock for all chunk operations
+    int processedChunks = 0;
+    const int maxChunksPerFrame = 10;
+
+    //pos in chunks (eg 0,0,1)
+    glm::ivec3 playerChunkPos = glm::ivec3(
+        floor(player->getCameraPos().x / CHUNK_SIZE),
+        0, // Y is fixed at 0 for chunk coordinates
+        floor(player->getCameraPos().x / CHUNK_SIZE)
+    );
+
+    //pos in world space,locked to chunk ( 0,0,16)
+    glm::vec3 playerChunkRealPos = glm::vec3(
+        playerChunkPos.x * CHUNK_SIZE,
+        -Chunk::baseTerrainHeight,
+        playerChunkPos.z * CHUNK_SIZE
+    );
+
+    auto playerChunkIt = chunks.find(playerChunkRealPos); 
+    if (playerChunkIt != chunks.end() && processedChunks < maxChunksPerFrame) { 
+        Chunk& playerChunk = playerChunkIt->second; 
+        if (playerChunk.isActive) { 
+            if (playerChunk.fullRebuildNeeded) {  
+                updateChunkMeshAsync(playerChunk); 
+            } 
+            tryApplyChunkMeshUpdate(playerChunk);
+            processedChunks++;
+        }
     }
-    //create noise for world gen
-    noiseGen.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
-    noiseGen.SetSeed(seed);
+
+    for (auto& pair : chunks) {
+        if (processedChunks >= maxChunksPerFrame) break;
+        Chunk& chunk = pair.second;
+        if (chunk.isActive) {
+            if (chunk.fullRebuildNeeded) {
+                updateChunkMeshAsync(chunk);
+            }
+            tryApplyChunkMeshUpdate(chunk); 
+        }
+    }  
+}
+void Main::run() {
 
     createCube();
     createLight();
@@ -981,21 +1027,7 @@ void Main::run() {
         player->update(deltaTime, chunks); 
         processInput(window); 
 
-        {
-            std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Single lock for all chunk operations
-            int processedChunks = 0;
-            const int maxChunksPerFrame = 1;
-            for (auto& pair : chunks) {
-                if (processedChunks >= maxChunksPerFrame) break; 
-                Chunk& chunk = pair.second;
-                if (chunk.isActive) {
-                    if (chunk.fullRebuildNeeded) {
-                        updateChunkMeshAsync(chunk);
-                    }
-                    tryApplyChunkMeshUpdate(chunk);
-                }
-            }
-        } // Mutex unlocked here
+        processChunkMeshingInOrder();
 
         render();
         doFps();

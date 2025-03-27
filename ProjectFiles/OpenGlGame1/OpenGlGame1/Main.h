@@ -27,7 +27,11 @@ class Main
 {
 public:
 
-	static const size_t MAX_ASYNC_TASKS = 16; 
+	//thread count
+	static const size_t MAX_ASYNC_TASKS() {
+		return std::thread::hardware_concurrency();
+	} 
+		
 	size_t activeAsyncTasks = 0; // Track running tasks
 	std::recursive_mutex chunksMutex; 
 	std::mutex logMutex;
@@ -95,6 +99,7 @@ private:
 	int seed = -1;
 	void updateChunkMeshAsync(Chunk& chunk);
 	void tryApplyChunkMeshUpdate(Chunk& chunk);
+	void processChunkMeshingInOrder();
 	
 
 	//fps tracking & timing

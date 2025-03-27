@@ -6,8 +6,10 @@
 
 #include "Main.h"//need for full main deffinition
 
+
 Chunk::Chunk(glm::vec3 position,int seed, Main* m)
-	: chunkPosition(position),main(m), VAO(0), VBO(0), EBO(0) {
+	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR),
+		VAO(0), VBO(0), EBO(0) {
 
 	size_t maxBlocks = chunkSize * chunkHeight * chunkSize; // Worst case: fully solid
 	size_t expectedBlocks = chunkSize * (chunkHeight / 2) * chunkSize; // Assume half height
@@ -41,12 +43,9 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 			int terrainHeight = baseTerrainHeight + static_cast<int>((height + 1.0f) * 0.5f * (maxTerrainHeight - 1));
 
 			for (int y = 0; y < chunkHeight; y++) {
-
-				glm::ivec3 pos(x, y, z);
-
 				BlockType type; 
 
-				//dont add block type for air as its left empty
+				//dont add block type for air as its air by default
 				if (y > terrainHeight) {
 					continue;
 				}
@@ -60,7 +59,8 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 					type = BlockType::STONE;
 				}
 
-				blocks[pos] = type; 
+				size_t index = getBlockIndex(x, y, z);
+				blocks[index] = type;
 			}
 		}
 	}
@@ -167,31 +167,37 @@ void Chunk::generateMesh() {
 */
 
 MeshData Chunk::generateMeshData() {
+	cacheNeighbors();
 	MeshData meshData;
-	for (std::unordered_map<glm::ivec3, BlockType, IVec3Hash>::const_iterator blockIt = blocks.begin(); blockIt != blocks.end(); ++blockIt) {
-		if (blockIt->second == BlockType::AIR) continue; // Skip air blocks
-		glm::ivec3 pos = blockIt->first;
 
-		// Basic occlusion culling: skip fully surrounded blocks
-		bool isSurrounded = true;
-		for (int dx = -1; dx <= 1; dx += 2) {
-			if (!isBlockSolid(pos.x + dx, pos.y, pos.z)) { isSurrounded = false; break; }
-		}
-		if (isSurrounded) {
-			for (int dy = -1; dy <= 1; dy += 2) {
-				if (!isBlockSolid(pos.x, pos.y + dy, pos.z)) { isSurrounded = false; break; }
+	for (int x = 0; x < chunkSize; x++) {
+		for (int y = 0; y < chunkHeight; y++) {
+			for (int z = 0; z < chunkSize; z++) {
+				size_t index = getBlockIndex(x, y, z);
+				if (blocks[index] == BlockType::AIR) continue; // Skip air blocks
+
+				// Basic occlusion culling: skip fully surrounded blocks
+				bool isSurrounded = true;
+				for (int dx = -1; dx <= 1; dx += 2) {
+					if (!isBlockSolid(x + dx, y, z)) { isSurrounded = false; break; }
+				}
+				if (isSurrounded) {
+					for (int dy = -1; dy <= 1; dy += 2) {
+						if (!isBlockSolid(x, y + dy, z)) { isSurrounded = false; break; }
+					}
+				}
+				if (isSurrounded) {
+					for (int dz = -1; dz <= 1; dz += 2) {
+						if (!isBlockSolid(x, y, z + dz)) { isSurrounded = false; break; }
+					}
+				}
+				if (isSurrounded) continue; // Skip fully occluded blocks
+
+				std::vector<float>& vertices = meshData.verticesByType [blocks[index]];
+				std::vector<unsigned int>& indices = meshData.indicesByType[blocks[index]];
+				generateBlockFaces(vertices, indices, glm::ivec3(x,y,z));
 			}
 		}
-		if (isSurrounded) {
-			for (int dz = -1; dz <= 1; dz += 2) {
-				if (!isBlockSolid(pos.x, pos.y, pos.z + dz)) { isSurrounded = false; break; }
-			}
-		}
-		if (isSurrounded) continue; // Skip fully occluded blocks
-
-		std::vector<float>& vertices = meshData.verticesByType[blockIt->second];
-		std::vector<unsigned int>& indices = meshData.indicesByType[blockIt->second];
-		generateBlockFaces(vertices, indices, pos);
 	}
 	return meshData;
 }
@@ -311,96 +317,56 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 	glm::ivec3 pos(x, y, z); 
 
 	if (x >= 0 && x < chunkSize && z >= 0 && z < chunkSize) {//if in chunk
-		auto it = blocks.find(pos);
-		return it != blocks.end() && it->second != BlockType::AIR; 
+		size_t index = getBlockIndex(x, y, z); 
+		return blocks[index] != BlockType::AIR; 
 	}
 	
 
 	// Position is outside this chunk, find the neighboring chunk
-	glm::vec3 chunkOffset(0);
-	if (x < 0) chunkOffset.x = -chunkSize;
-	else if (x >= chunkSize) chunkOffset.x = chunkSize;
-	if (z < 0) chunkOffset.z = -chunkSize;
-	else if (z >= chunkSize) chunkOffset.z = chunkSize;
-	// Assume y is fixed for simplicity; adjust if chunks stack vertically 
-
-	glm::vec3 neighborPos = chunkPosition + chunkOffset;
-	Chunk* neighbor = main->getChunk(neighborPos); 
+	Chunk* neighbor = nullptr; 
+	int localX = x;
+	int localZ = z; 
+	if (x < 0) { 
+		neighbor = neighbors[1]; // -X 
+		localX = x + chunkSize; 
+	}
+	else if (x >= chunkSize) {
+		neighbor = neighbors[0]; // +X 
+		localX = x - chunkSize; 
+	}
+	if (z < 0) {
+		neighbor = neighbors[3]; // -Z 
+		localZ = z + chunkSize; 
+	}
+	else if (z >= chunkSize) { 
+		neighbor = neighbors[2]; // +Z
+		localZ = z - chunkSize; 
+	}
 	if (!neighbor) {
 		return false; // No chunk exists, assume air
 	}
 
-	// Adjust coordinates to be local to the neighboring chunk
-	int localX = x < 0 ? x + chunkSize : x % chunkSize;
-	int localZ = z < 0 ? z + chunkSize : z % chunkSize;
-	int localY = y;
-	return neighbor->isBlockSolid(localX, localY, localZ);
+	// Check the block in the neighboring chunk
+	size_t index = neighbor->getBlockIndex(localX, y, localZ);
+	return neighbor->blocks[index] != BlockType::AIR;
 }
 
 void Chunk::setBlock(int x, int y, int z, BlockType type) {
 	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return;//if outside chunk
 
-	glm::ivec3 pos(x, y, z);
-
-	if (type == BlockType::AIR) {
-		blocks.erase(pos);
-	}
-	else {
-		blocks.emplace(pos, type);    
-	}
-
-	fullRebuildNeeded = true;
+	size_t index = getBlockIndex(x, y, z); 
+	blocks[index] = type; 
+	fullRebuildNeeded = true;  
 }
 
-/*
-void Chunk::updateMesh() {
-
-	//first chunk build
-	if (fullRebuildNeeded) {
-		generateMesh();
-		fullRebuildNeeded = false;
-		dirtyBlocks.clear();
-		return;
-	}
-
-	if (dirtyBlocks.empty()) return;//if no blocks updates needed
-
-	// Update only dirty blocks
-	std::unordered_map<BlockType, std::vector<float>> tempVerts;
-	std::unordered_map<BlockType, std::vector<unsigned int>> tempIdxs;
-	for (const auto& pos : dirtyBlocks) {
-		auto it = blocks.find(pos);
-		BlockType type = (it != blocks.end()) ? it->second : BlockType::AIR;
-		tempVerts[type].clear();
-		tempIdxs[type].clear();
-		if (type != BlockType::AIR) {
-			generateBlockFaces(tempVerts[type], tempIdxs[type], pos);
-		}
-	}
-
-	// Merge into existing buffers
-	for (const auto& it : tempVerts) {
-		verticesByType[it.first] = std::move(it.second);
-		indicesByType[it.first] = std::move(tempIdxs[it.first]);
-	} 
-
-	// Update only the changed vertices and indices
-	for (const auto& it : tempVerts) {
-		BlockType type = it.first; 
-		auto& vertices = it.second; 
-		auto& indices = tempIdxs[type]; 
-
-		unsigned int baseIndex = baseIndicesByType[type];
-
-		// Update vertices for the specific block type
-		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		glBufferSubData(GL_ARRAY_BUFFER, baseIndex * 11 * sizeof(float), vertices.size() * sizeof(float), vertices.data());
-
-		// Update indices for the specific block type
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, baseIndex * sizeof(unsigned int), indices.size() * sizeof(unsigned int), indices.data());
-	}
-	 
-	dirtyBlocks.clear();  
+// Helper to get the index in the 1D array from 3D coordinates
+size_t Chunk::getBlockIndex(int x, int y, int z) const {
+	return (y * chunkSize * chunkSize) + (z * chunkSize) + x;
 }
-*/
+
+void Chunk::cacheNeighbors() { 
+	neighbors[0] = main->getChunk(chunkPosition + glm::vec3(chunkSize, 0, 0));  // +X
+	neighbors[1] = main->getChunk(chunkPosition + glm::vec3(-chunkSize, 0, 0)); // -X
+	neighbors[2] = main->getChunk(chunkPosition + glm::vec3(0, 0, chunkSize));  // +Z
+	neighbors[3] = main->getChunk(chunkPosition + glm::vec3(0, 0, -chunkSize)); // -Z
+}
