@@ -14,3 +14,21 @@ struct IVec3Hash {//blocks
 		return std::hash<int>()(v.x) ^ (std::hash<int>()(v.y) << 1) ^ (std::hash<int>()(v.z) << 2);
 	}
 };
+
+
+struct IVec2Hash {
+	size_t operator()(const glm::ivec2& v) const {
+		return std::hash<int>()(v.x) ^ (std::hash<int>()(v.y) << 1);
+	}
+};
+
+struct PairHash {
+	template <typename T1, typename T2>
+	std::size_t operator ()(const std::pair<T1, T2>& p) const {
+		auto h1 = std::hash<T1>{}(p.first);
+		auto h2 = std::hash<T2>{}(p.second);
+
+		// Combine the two hash values into one
+		return h1 ^ (h2 << 1); // or use some other method to combine the hashes
+	}
+};

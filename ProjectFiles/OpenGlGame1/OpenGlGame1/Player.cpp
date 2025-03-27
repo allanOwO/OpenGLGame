@@ -68,7 +68,7 @@ void Player::processMouseMovement(GLFWwindow* window, double xpos, double ypos) 
 }
 
 void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
-    float camSpeed = camSpeedBase * deltaTime;
+    float camSpeed = camSpeedBase;
 
     // Apply gravity
     velocity.y += gravity * deltaTime;

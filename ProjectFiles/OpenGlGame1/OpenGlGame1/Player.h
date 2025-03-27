@@ -45,7 +45,7 @@ private:
 	float yaw = -90.0f;//offest at beginign to allign to -z
 	float pitch = 0.0f;
 
-	const float camSpeedBase = 1000.0f;
+	const float camSpeedBase = 10.0f;
 	const float lookSens = 0.1f;
 
 

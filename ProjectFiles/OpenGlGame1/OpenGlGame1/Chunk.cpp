@@ -2,7 +2,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
-#include <FastNoiseLite.h>
+#include <glm/vec2.hpp>
 
 #include "Main.h"//need for full main deffinition
 
@@ -13,19 +13,31 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 	size_t expectedBlocks = chunkSize * (chunkHeight / 2) * chunkSize; // Assume half height
 	blocks.reserve(std::min(expectedBlocks, blocks.max_size() / 2));
 
-	 
-	FastNoiseLite noise;
-	noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-	noise.SetFrequency(0.03f); // Lower frequency for smoother terrain
-	
-	noise.SetSeed(seed);
+	//use noise, with caching, from main
+	if (!main) std::cerr << "main nullptr" << "\n";
 	
 	for (int x = 0; x < chunkSize; x++) { 
 		for (int z = 0; z < chunkSize; z++) {
 
 			float worldX = chunkPosition.x + x;
 			float worldZ = chunkPosition.z + z;
-			float height = noise.GetNoise(worldX, worldZ);
+
+			glm::ivec2 noiseKey(worldX, worldZ);
+			float height; 
+
+			std::lock_guard<std::mutex> lock(main->noiseMutex);
+			//if noise cached
+			if (main->noiseCache.find(noiseKey) != main->noiseCache.end()) {
+				height = main->noiseCache[noiseKey];
+			}
+			else//compute noise and cache
+			{
+				height = main->noiseGen.GetNoise(worldX, worldZ);
+				main->noiseCache[noiseKey] = height;
+			}
+			
+			//height = main->noiseGen.GetNoise(worldX, worldZ);
+
 			int terrainHeight = baseTerrainHeight + static_cast<int>((height + 1.0f) * 0.5f * (maxTerrainHeight - 1));
 
 			for (int y = 0; y < chunkHeight; y++) {

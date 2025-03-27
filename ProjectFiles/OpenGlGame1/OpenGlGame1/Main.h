@@ -17,6 +17,9 @@
 #include <future>//threading
 #include <thread>
 #include "MeshData.h"
+#include <FastNoiseLite.h>
+#include <glm/vec2.hpp>
+
 
 
 
@@ -24,7 +27,7 @@ class Main
 {
 public:
 
-	static const size_t MAX_ASYNC_TASKS = 8; 
+	static const size_t MAX_ASYNC_TASKS = 16; 
 	size_t activeAsyncTasks = 0; // Track running tasks
 	std::recursive_mutex chunksMutex; 
 	std::mutex logMutex;
@@ -34,6 +37,12 @@ public:
 
 	void run();
 	Chunk* getChunk(const glm::vec3& pos);
+
+	static FastNoiseLite noiseGen;
+	static std::unordered_map<glm::ivec2, float, IVec2Hash> noiseCache; 
+	std::mutex noiseMutex;
+
+
 
 private:
 

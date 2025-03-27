@@ -14,7 +14,8 @@
 #define CHUNK_SIZE 16
 #define RENDER_DISTANCE 8
 
-
+FastNoiseLite Main::noiseGen;
+std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
 
 
 Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
@@ -22,6 +23,16 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
 
     init();
     player = std::make_unique<Player>(window);  // Use smart pointer for automatic cleanup;//give window to player
+
+    int range = CHUNK_SIZE * RENDER_DISTANCE;
+
+    for (float x = -range; x < range; x++) {
+        for (float z = -range; z < range; z++) {
+
+            noiseCache[{x, z}] = noiseGen.GetNoise(x,z);  // Fixed value 
+        }
+    }
+    
 }
 
 Main::~Main() {
@@ -90,8 +101,10 @@ void Main::init() {
     glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
-    glfwSwapInterval(1);// 1 = V-Sync on, 0 = V-Sync off 
+    glfwSwapInterval(0);// 1 = V-Sync on, 0 = V-Sync off 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
+
+    
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -933,6 +946,10 @@ void Main::run() {
         seed = rd();
         std::cout << seed;
     }
+    //create noise for world gen
+    noiseGen.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
+    noiseGen.SetSeed(seed);
 
     createCube();
     createLight();
