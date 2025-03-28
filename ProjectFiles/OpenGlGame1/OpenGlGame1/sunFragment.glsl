@@ -12,6 +12,6 @@ void main()
     float softness = 0.1;
     float sunAlpha = smoothstep(radius + softness, radius, dist);
     if (dist > radius + softness) discard;
-   // FragColour = vec4(sunColour, 1.0 - sunAlpha);
-    FragColour = vec4(1.0, 0.0, 0.0, 1.0); // Solid red for testing
+    FragColour = vec4(sunColour, 1.0 - sunAlpha);
+   // FragColour = vec4(1.0, 0.0, 0.0, 1.0); // Solid red for testing
 }

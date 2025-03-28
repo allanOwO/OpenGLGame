@@ -322,7 +322,7 @@ void Main::createSun() {
          0.5f, -0.5f,  1.0f, 0.0f, // Bottom-right
         -0.5f, -0.5f,  0.0f, 0.0f  // Bottom-left
     };
-    unsigned int sunIndices[] = { 0, 1, 2, 2, 3, 0 };
+    unsigned int sunIndices[] = { 0, 3, 2, 2, 1, 0 };//reversed winding order
 
     glGenVertexArrays(1, &sunVAO);
     glGenBuffers(1, &sunVBO);
@@ -383,29 +383,12 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
     glm::vec3 sunColour = glm::mix(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(1.0f, 0.5f, 0.0f), transitionFactor);
 
     sunShader->use();
-    GLint currentProgram;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-    if (currentProgram != sunShader->ID) {
-        std::cerr << "Sun shader not active in renderSun(). Expected: " << sunShader->ID << ", Got: " << currentProgram << std::endl;
-    }
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after use: " << error << std::endl;
+
 
     glUniformMatrix4fv(sunViewLoc, 1, GL_FALSE, glm::value_ptr(view));
-    error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after view uniform: " << error << std::endl;
-
-    glUniformMatrix4fv(sunProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
-    error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after projection uniform: " << error << std::endl;
-
+    glUniformMatrix4fv(sunProjLoc, 1, GL_FALSE, glm::value_ptr(projection));  
     glUniform3fv(sunSunDirLoc, 1, glm::value_ptr(sunDirection));
-    error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after sunDirection uniform: " << error << std::endl;
-
     glUniform3fv(sunColourLoc, 1, glm::value_ptr(sunColour));
-    error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after sunColour uniform: " << error << std::endl;
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -413,16 +396,10 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
 
     glBindVertexArray(sunVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    error = glGetError();
-    if (error != GL_NO_ERROR) std::cerr << "Error after draw: " << error << std::endl;
 
     glBindVertexArray(0); 
     glEnable(GL_DEPTH_TEST); 
     glDisable(GL_BLEND);  
-
-    // Debug: Print sun position
-    glm::vec3 sunPos = normalize(sunDirection) * 10.0f;
-    std::cout << "Sun position: (" << sunPos.x << ", " << sunPos.y << ", " << sunPos.z << ")" << std::endl;
 }
 
 void Main::render() {
@@ -442,15 +419,19 @@ void Main::render() {
     // Rotate sun direction based on time
     float time = glfwGetTime();
     float angle = time * 0.5f; // Adjust speed (0.1f = slow rotation, increase for faster)
-    glm::vec3 baseSunDirection = glm::vec3(1.0f, 0.0f, 0.0f); // Starting direction in east
 
-    // Rotate around Y-axis for east-west motion
-    glm::vec3 horizontalDir = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0.0f, 1.0f, 0.0f))) * baseSunDirection;
-    // Add height variation
-    float height = sin(angle); // Ranges from -1 to 1
-    sunDirection = glm::normalize(glm::vec3(horizontalDir.x, height, horizontalDir.z));
-    std::cout << "sunDirection: (" << sunDirection.x << ", " << sunDirection.y << ", " << sunDirection.z << ")" << std::endl;
+    // Define a tilt for more natural movement
+    float tiltAngle = glm::radians(77.5f);
 
+    // Compute sun direction using a circular motion
+    glm::vec3 sunDir = glm::normalize(glm::vec3(
+        cos(angle),                      // Moves left/right (X)
+        sin(angle) * sin(tiltAngle),      // Moves up/down (Y) with tilt
+        sin(angle) * cos(tiltAngle)       // Moves forward/backward (Z)
+    ));
+
+    // Set the sun direction
+    sunDirection = sunDir; 
 
     //use normal shader for cube + chunks
     shader->use(); 
@@ -494,7 +475,7 @@ void Main::render() {
         glBindVertexArray(0);
     }
 
-    renderSun(view,projection,sunDirection); 
+    renderSun(view,projection,-sunDirection); 
 }
 
 
