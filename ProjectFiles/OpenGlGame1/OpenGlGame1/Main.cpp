@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 8
+#define RENDER_DISTANCE 32
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.3f
 
@@ -348,8 +348,9 @@ void Main::createSun() {
 void Main::drawChunks() { 
     std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
     for (const auto& pair : chunks) {
-        const glm::vec3& pos = pair.first;
+        
         const Chunk& chunk = pair.second;
+        const glm::vec3& pos = chunk.chunkPosition;
 
         // Frustum culling 
         glm::vec3 min = pos;
@@ -479,25 +480,18 @@ void Main::render() {
     renderSun(view,projection,-sunDirection); 
 }
 
-void Main::generateChunk(const glm::vec3& pos) {
-
-
-    // Create a new chunk at (x, 0, z), gen mesh
-    chunks.emplace(pos, Chunk(pos, seed, this));
-    chunks.at(pos).isActive = true; 
-
-    chunkModels.clear();
-    for (const auto& pair : chunks) { 
-        chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), pair.first)); 
-    }
-}
-
 void Main::generateChunkAsync(const glm::vec3& pos) {
     // Launch async task to generate the chunk
-    chunkGenerationFutures[pos] = std::async(std::launch::async, [this, pos]() {
+
+    int chunkX = static_cast<int>(pos.x / CHUNK_SIZE);
+    int chunkZ = static_cast<int>(pos.z / CHUNK_SIZE);
+    uint64_t key = getChunkKey(chunkX, chunkZ);
+
+    chunkGenerationFutures[key] = std::async(std::launch::async, [this, pos,key]() {
         Chunk chunk(pos, seed, this);
-        return chunk;
-        });
+        std::lock_guard<std::recursive_mutex> lock(chunksMutex); 
+        chunks.emplace(key, std::move(chunk)); // Store in chunks with the uint64_t key
+        }); 
 }
 
 void Main::tryApplyChunkGeneration() {
@@ -505,17 +499,19 @@ void Main::tryApplyChunkGeneration() {
     for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             
-            Chunk chunk = it->second.get();
-            glm::vec3 pos = chunk.chunkPosition;
+            uint64_t key = it->first; // The key is the uint64_t chunk identifier
+            auto chunkIt = chunks.find(key);
+            if (chunkIt != chunks.end()) {
+                Chunk& chunk = chunkIt->second;
 
-            chunk.initializeBuffers(); 
+                // Initialize buffers for rendering
+                chunk.initializeBuffers(); 
 
-            chunks.emplace(pos, std::move(chunk));
-            
-            chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),pos));
-            
-            it = chunkGenerationFutures.erase(it);
+                chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), chunk.chunkPosition));
+            }
 
+            // Remove the completed future
+            it = chunkGenerationFutures.erase(it); 
             
         }
         else {
@@ -526,41 +522,50 @@ void Main::tryApplyChunkGeneration() {
 
 void Main::updateChunks(const glm::vec3& playerPosition) {
     // Calculate the player's chunk position in chunk coordinates
-    glm::ivec3 playerChunkPos = glm::ivec3(
-        floor(playerPosition.x / CHUNK_SIZE),
+    glm::ivec3 playerChunkPos(
+        static_cast<int>(floor(playerPosition.x / CHUNK_SIZE)), 
         0, // Y is fixed at 0 for chunk coordinates
-        floor(playerPosition.z / CHUNK_SIZE)
+        static_cast<int>(floor(playerPosition.z / CHUNK_SIZE))
     );
+    uint64_t playerKey = getChunkKey(playerChunkPos.x, playerChunkPos.z); 
 
-    // Use a vector of pairs to store chunk positions and their distances
-    std::vector<std::pair<glm::ivec3, float> > chunkPositions;
+    // Store chunk positions and distances
+    std::vector<std::pair<uint64_t, float>> chunkPositions;
     int effectiveRenderDistance = isInitialLoading ? currentLoadingRadius : RENDER_DISTANCE;
+    chunkPositions.reserve((2 * effectiveRenderDistance + 1) * (2 * effectiveRenderDistance + 1)); // Preallocate 
+
     for (int x = -effectiveRenderDistance; x <= effectiveRenderDistance; x++) {
         for (int z = -effectiveRenderDistance; z <= effectiveRenderDistance; z++) {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z); // Offset in chunk coordinates
+            uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);  
             glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
+            
             // Use Manhattan distance for faster sorting (no square root needed)
             float distance = std::abs(realChunkPos.x - playerPosition.x) + std::abs(realChunkPos.z - playerPosition.z);
-            chunkPositions.push_back(std::make_pair(chunkPos, distance));
+            chunkPositions.emplace_back(key, distance);
         }
     }
 
-    // Sort by distance to prioritize closer chunks
+    // Sort by distance
     std::sort(chunkPositions.begin(), chunkPositions.end(),
-        [](const std::pair<glm::ivec3, float>& a, const std::pair<glm::ivec3, float>& b) {
+        [](const std::pair<uint64_t, float>& a, const std::pair<uint64_t, float>& b) {
             return a.second < b.second;
         });
 
-    std::unordered_set<glm::ivec3, IVec3Hash> loadedChunks;
+    std::unordered_set<uint64_t> loadedChunks;
+    loadedChunks.reserve(chunkPositions.size());//reduce rehashing
     int chunksGeneratedThisFrame = 0;
     const int maxChunksGeneratedPerFrame = isInitialLoading ? 2 : 1; // Load 2 chunks per frame during initial loading
-    for (std::vector<std::pair<glm::ivec3, float> >::const_iterator it = chunkPositions.begin(); it != chunkPositions.end(); ++it) {
+    
+    for (const auto& pair : chunkPositions) {
         if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
-        glm::ivec3 chunkPos = it->first;
-        float distance = it->second;
-        loadedChunks.insert(chunkPos);
-        glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
-        if (chunks.find(realChunkPos) == chunks.end() && chunkGenerationFutures.find(realChunkPos) == chunkGenerationFutures.end()) {
+
+        loadedChunks.insert(pair.first);
+        int chunkX = static_cast<int32_t>(pair.first >> 32); // Extract x
+        int chunkZ = static_cast<int32_t>(pair.first & 0xFFFFFFFF); // Extract z
+        glm::vec3 realChunkPos(chunkX * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkZ * CHUNK_SIZE);
+
+        if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
             generateChunkAsync(realChunkPos);
             chunksGeneratedThisFrame++;
         }
@@ -573,13 +578,9 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
         int expectedChunks = (2 * currentLoadingRadius + 1) * (2 * currentLoadingRadius + 1);
         int loadedChunksCount = 0;
         for (const auto& pair : chunks) {
-            glm::ivec3 chunkKey = glm::ivec3(
-                pair.first.x / CHUNK_SIZE,
-                0,
-                pair.first.z / CHUNK_SIZE
-            );
-            int dx = std::abs(chunkKey.x - playerChunkPos.x);
-            int dz = std::abs(chunkKey.z - playerChunkPos.z);
+            
+            int dx = std::abs(pair.second.chunkPosition.x / CHUNK_SIZE - playerChunkPos.x);
+            int dz = std::abs(pair.second.chunkPosition.z / CHUNK_SIZE - playerChunkPos.z);
             if (dx <= currentLoadingRadius && dz <= currentLoadingRadius) {
                 loadedChunksCount++;
             }
@@ -595,24 +596,22 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
 
     // Mark chunks as active/inactive
     std::lock_guard<std::recursive_mutex> lock(chunksMutex);
-    for (std::unordered_map<glm::vec3, Chunk, Vec3Hash>::iterator pair = chunks.begin(); pair != chunks.end(); ++pair) {
-        glm::ivec3 chunkKey = glm::ivec3(
-            pair->first.x / CHUNK_SIZE,
-            0,
-            pair->first.z / CHUNK_SIZE
-        );
-        if (loadedChunks.find(chunkKey) == loadedChunks.end()) {
-            pair->second.isActive = false;
+    for (auto& pair : chunks) {
+        if (loadedChunks.find(pair.first) == loadedChunks.end()) {
+            pair.second.isActive = false;
         }
         else {
-            pair->second.isActive = true;
+            pair.second.isActive = true;
         }
     }
 }
 
 Chunk* Main::getChunk(const glm::vec3& pos) {
     std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Keep this for external access
-    auto it = chunks.find(pos);
+
+    uint64_t key = getChunkKey(pos.x, pos.z);
+    // Look up the chunk
+    auto it = chunks.find(key);
     return (it != chunks.end()) ? &it->second : nullptr;
 } 
 
@@ -702,7 +701,10 @@ void Main::raycastBlock() {
         chunkPos.y = -Chunk::baseTerrainHeight; // Set to the fixed Y-position of chunks (adjust as needed)
 
         // Look up the chunk in the map
-        auto it = chunks.find(chunkPos);
+
+        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
+        // Look up the chunk
+        auto it = chunks.find(key);
         if (it != chunks.end()) {
             Chunk& chunk = it->second;
 
@@ -747,8 +749,9 @@ void Main::placeBlock() {
         glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        // Look for the chunk in the chunks map
-        auto it = chunks.find(chunkPos);
+        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
+        // Look up the chunk
+        auto it = chunks.find(key);
         if (it != chunks.end()) {
             Chunk& chunk = it->second;
 
@@ -776,8 +779,9 @@ void Main::breakBlock() {
         glm::vec3 chunkPos = glm::floor(highlightedBlockPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        // Find the chunk in the map
-        auto it = chunks.find(chunkPos);
+        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
+        // Look up the chunk
+        auto it = chunks.find(key);;
         if (it != chunks.end()) {
             Chunk& chunk = it->second;
             // Calculate local coordinates
@@ -957,7 +961,10 @@ void Main::processChunkMeshingInOrder() {
         playerChunkPos.z * CHUNK_SIZE
     );
 
-    auto playerChunkIt = chunks.find(playerChunkRealPos); 
+    uint64_t key = getChunkKey(playerChunkRealPos.x, playerChunkRealPos.z);
+    // Look up the chunk
+    auto playerChunkIt = chunks.find(key);
+     
     if (playerChunkIt != chunks.end() && processedChunks < maxChunksPerFrame) { 
         Chunk& playerChunk = playerChunkIt->second; 
         if (playerChunk.isActive) { 
@@ -1001,8 +1008,8 @@ void Main::run() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        // Cap deltaTime to prevent large spikes (e.g., max 1/30 seconds)
-        const float maxDeltaTime = 1.0f / 60.0f; // 30 FPS minimum
+        // Cap deltaTime to prevent large spikes
+        const float maxDeltaTime = 1.0f / 60.0f;
         if (deltaTime > maxDeltaTime) {
             deltaTime = maxDeltaTime;
         }

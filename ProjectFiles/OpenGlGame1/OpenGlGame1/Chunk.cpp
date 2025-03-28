@@ -94,78 +94,6 @@ void Chunk::initializeBuffers() {
 	}
 }
 
-/*
-void Chunk::generateMesh() {
-
-	verticesByType.clear();
-	indicesByType.clear();
-	baseIndicesByType.clear();
-
-	//itterate existing blocks, excludes air
-	for (const auto& b : blocks) {
-		// .second means the second item in the map, so here it is block 
-		generateBlockFaces(verticesByType[b.second], indicesByType[b.second], b.first); 
-	}
-
-	// Set up VAO/VBO/EBO for the entire chunk
-	glGenVertexArrays(1, &VAO);
-	glBindVertexArray(VAO);
-
-	glGenBuffers(1, &VBO);
-	glGenBuffers(1, &EBO);
-
-	// Concatenate all vertices into one VBO, but track offsets
-	std::vector<float> allVertices;
-	std::vector<unsigned int> allIndices;
-	unsigned int vertexOffset = 0;
-	unsigned int indexOffset = 0;
-
-	for (auto& pair : verticesByType) {
-		BlockType type = pair.first;
-		auto& vertices = pair.second;
-		auto& indices = indicesByType[type];
-
-		baseIndicesByType[type] = indexOffset;
-
-		allVertices.insert(allVertices.end(), vertices.begin(), vertices.end());
-
-		for (unsigned int idx : indices) {
-			allIndices.push_back(idx + vertexOffset / 11); // 11 floats per vertex
-		}
-
-		vertexOffset += vertices.size();
-		indexOffset += indices.size();
-	}
-
-	//std::cout << "Total vertices stored: " << allVertices.size() / 11 << std::endl;
-	//std::cout << "Total float size (MB): " << (allVertices.size() * sizeof(float)) / (1024.0f * 1024.0f) << " MB\n";
-
-	std::cout << "Chunk at " << chunkPosition.x << "," << chunkPosition.z 
-		<< ": Vertices: " << allVertices.size() / 11 << " (" << allVertices.size() * 4 / 1024 << " KB), " 
-		<< "Indices: " << allIndices.size() << " (" << allIndices.size() * 4 / 1024 << " KB)" << std::endl; 
-
-
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
-
-	// Vertex attributes
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0); // Position 
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float))); // Color 
-	glEnableVertexAttribArray(1); 
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float))); // Texture
-	glEnableVertexAttribArray(2); 
-	glVertexAttribPointer(3, 3, GL_HALF_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float))); // Normal
-	glEnableVertexAttribArray(3); 
-
-	glBindVertexArray(0);
-}
-*/
-
 MeshData Chunk::generateMeshData() {
 	cacheNeighbors();
 	MeshData meshData;
@@ -365,7 +293,6 @@ bool Chunk::isBlockSolid(int x, int y, int z) {
 void Chunk::setBlock(int x, int y, int z, BlockType type) {
 	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return;//if outside chunk
 
-	std::cout << currentTallestBlock;
 	size_t index = getBlockIndex(x, y, z); 
 
 	//technically incorrect as there could be >1 blocks at max height

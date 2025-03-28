@@ -100,7 +100,7 @@ public:
 private:
 	
 	void generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos);
-	bool isBlockSolid(int x, int y, int z);
+	bool isBlockSolid(int x, int y, int z); 
 	void cacheNeighbors();
  
 	Chunk* neighbors[4]; // +X, -X, +Z, -Z 

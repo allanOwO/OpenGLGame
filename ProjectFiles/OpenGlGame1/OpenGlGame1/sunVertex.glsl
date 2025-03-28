@@ -7,10 +7,11 @@ out vec2 TexCoord;
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 sunDirection;
+uniform vec3 camPos;
 
 void main()
 {
-    vec3 sunPos = normalize(sunDirection) * 500.0; // Far away in sun direction
+    vec3 sunPos = camPos + normalize(sunDirection) * 500.0; // Far away in sun direction
 
     mat4 billboard = mat4(
         vec4(view[0][0], view[1][0], view[2][0], 0.0), // Right

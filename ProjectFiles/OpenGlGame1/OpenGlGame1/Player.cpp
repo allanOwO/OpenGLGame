@@ -26,7 +26,7 @@ void Player::spawn(glm::vec3 spawnPos) {
     cameraPos = bodyPos + glm::vec3(0, eyeLevel, 0);
 }
 
-void Player::update(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
+void Player::update(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks) {
 
     playerMovement(deltaTime, chunks);
 }
@@ -67,7 +67,7 @@ void Player::processMouseMovement(GLFWwindow* window, double xpos, double ypos) 
     cameraFront = glm::normalize(lookDirection);//set cam front to new direcction
 }
 
-void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks) {
+void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks) {
     float camSpeed = BASE_SPEED;
 
     // Apply gravity
@@ -118,10 +118,13 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
-            auto it = chunks.find(checkChunkPos);
+            
+            uint64_t key = getChunkKey(checkChunkPos.x / Chunk::chunkSize, checkChunkPos.z / Chunk::chunkSize);
+            // Look up the chunk
+            auto it = chunks.find(key);
             if (it != chunks.end()) {
                 const Chunk& chunk = it->second;
-                glm::vec3 chunkPos = it->first;
+                glm::vec3 chunkPos = chunk.chunkPosition;
                 for (int bx = -1; bx <= 1; bx++) {
                     for (int by = -1; by <= 1; by++) {
                         for (int bz = -1; bz <= 1; bz++) {
@@ -165,10 +168,13 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
-            auto it = chunks.find(checkChunkPos);
+
+            uint64_t key = getChunkKey(checkChunkPos.x/Chunk::chunkSize, checkChunkPos.z/Chunk::chunkSize);
+            // Look up the chunk
+            auto it = chunks.find(key);
             if (it != chunks.end()) {
                 const Chunk& chunk = it->second;
-                glm::vec3 chunkPos = it->first;
+                glm::vec3 chunkPos = chunk.chunkPosition;
                 for (int bx = -1; bx <= 1; bx++) {
                     for (int by = -1; by <= 1; by++) {
                         for (int bz = -1; bz <= 1; bz++) {
@@ -211,10 +217,13 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<glm::vec3,
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             glm::vec3 checkChunkPos = playerChunkPos + glm::vec3(dx * Chunk::chunkSize, 0, dz * Chunk::chunkSize);
-            auto it = chunks.find(checkChunkPos);
+
+            uint64_t key = getChunkKey(checkChunkPos.x / Chunk::chunkSize, checkChunkPos.z / Chunk::chunkSize); 
+            // Look up the chunk
+            auto it = chunks.find(key);
             if (it != chunks.end()) {
                 const Chunk& chunk = it->second;
-                glm::vec3 chunkPos = it->first;
+                glm::vec3 chunkPos = chunk.chunkPosition;
                 for (int bx = -1; bx <= 1; bx++) {
                     for (int by = -1; by <= 1; by++) {
                         for (int bz = -1; bz <= 1; bz++) {

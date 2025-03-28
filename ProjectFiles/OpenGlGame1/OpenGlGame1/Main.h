@@ -79,8 +79,8 @@ private:
 	//chunk stuff
 	//map to track async tasks for each chunk by its position. 
 	std::unordered_map<glm::vec3, std::future<MeshData>, Vec3Hash> chunkMeshFutures;  
-	std::unordered_map<glm::vec3, std::future<Chunk>, Vec3Hash> chunkGenerationFutures; // For async chunk generation 
-	std::unordered_map<glm::vec3,Chunk,Vec3Hash> chunks;
+	std::unordered_map<uint64_t, std::future<void>> chunkGenerationFutures; // For async chunk generation 
+	std::unordered_map<uint64_t,Chunk> chunks;
 
 	bool isInitialLoading; // Flag to track initial loading phase 
 	int currentLoadingRadius; // Current radius for loading chunks 

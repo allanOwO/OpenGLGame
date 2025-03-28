@@ -27,7 +27,7 @@ public:
 	Player(GLFWwindow* window);
 	
 	void spawn(glm::vec3 spawnPos); 
-	void update(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks); 
+	void update(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks);
 
 	// Getters for rendering
 	glm::vec3 getCameraPos() const { return cameraPos; }
@@ -40,7 +40,7 @@ public:
 
 private:
 	void processMouseMovement(GLFWwindow* window, double xpos, double ypos);
-	void playerMovement(float deltaTime, const std::unordered_map<glm::vec3, Chunk, Vec3Hash>& chunks);
+	void playerMovement(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks);
 
 	GLFWwindow* window;	
 

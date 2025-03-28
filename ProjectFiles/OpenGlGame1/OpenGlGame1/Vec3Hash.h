@@ -32,3 +32,9 @@ struct PairHash {
 		return h1 ^ (h2 << 1); // or use some other method to combine the hashes
 	}
 };
+
+inline uint64_t getChunkKey(int x, int z) { 
+	uint32_t ux = static_cast<uint32_t>(x);
+	uint32_t uz = static_cast<uint32_t>(z);
+	return (static_cast<uint64_t>(ux) << 32) | uz; 
+}
