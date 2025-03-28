@@ -21,10 +21,10 @@ std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache;
 
 
 Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
-                , isInitialLoading(true), currentLoadingRadius(1), maxLoadingRadius(RENDER_DISTANCE) {
+                , isInitialLoading(true), currentLoadingRadius(4), maxLoadingRadius(RENDER_DISTANCE) {
 
     init();
-    player = std::make_unique<Player>(window);  // Use smart pointer for automatic cleanup;//give window to player
+    player = std::make_unique<Player>(window,this);  // Use smart pointer for automatic cleanup;//give window to player
 
 
 
@@ -50,7 +50,7 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
 }
 
 Main::~Main() {
-    // Destructor: Clean up GLFW
+    player.reset();
     glfwDestroyWindow(window);
     glfwTerminate();
 }
@@ -557,19 +557,23 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
     int chunksGeneratedThisFrame = 0;
     const int maxChunksGeneratedPerFrame = isInitialLoading ? 2 : 1; // Load 2 chunks per frame during initial loading
     
-    for (const auto& pair : chunkPositions) {
-        if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
+    {
+        std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Lock here
+        for (const auto& pair : chunkPositions) {
+            if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
 
-        loadedChunks.insert(pair.first);
-        int chunkX = static_cast<int32_t>(pair.first >> 32); // Extract x
-        int chunkZ = static_cast<int32_t>(pair.first & 0xFFFFFFFF); // Extract z
-        glm::vec3 realChunkPos(chunkX * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkZ * CHUNK_SIZE);
+            loadedChunks.insert(pair.first);
+            int chunkX = static_cast<int32_t>(pair.first >> 32); // Extract x
+            int chunkZ = static_cast<int32_t>(pair.first & 0xFFFFFFFF); // Extract z
+            glm::vec3 realChunkPos(chunkX * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkZ * CHUNK_SIZE);
 
-        if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
-            generateChunkAsync(realChunkPos);
-            chunksGeneratedThisFrame++;
-        }
+            if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
+                generateChunkAsync(realChunkPos);
+                chunksGeneratedThisFrame++;
+            }
+        } 
     }
+    
 
     // Update the loading radius
     if (isInitialLoading) {
@@ -701,35 +705,31 @@ void Main::raycastBlock() {
         chunkPos.y = -Chunk::baseTerrainHeight; // Set to the fixed Y-position of chunks (adjust as needed)
 
         // Look up the chunk in the map
+        uint64_t key = getChunkKey(chunkPos.x / CHUNK_SIZE, chunkPos.z / CHUNK_SIZE); 
+        Chunk* chunk = nullptr;
+        { 
+            std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+            auto it = chunks.find(key);
+            if (it != chunks.end()) {
+                chunk = &it->second;
+            }
+        }
 
-        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
-        // Look up the chunk
-        auto it = chunks.find(key);
-        if (it != chunks.end()) {
-            Chunk& chunk = it->second;
+        if (chunk) { // Process chunk outside the lock to minimize lock duration
+            int localX = static_cast<int>(currentPos.x - chunk->chunkPosition.x);
+            int localY = static_cast<int>(currentPos.y - chunk->chunkPosition.y);
+            int localZ = static_cast<int>(currentPos.z - chunk->chunkPosition.z);
 
-            // Calculate local coordinates within the chunk
-            int localX = static_cast<int>(currentPos.x - chunk.chunkPosition.x);
-            int localY = static_cast<int>(currentPos.y - chunk.chunkPosition.y);
-            int localZ = static_cast<int>(currentPos.z - chunk.chunkPosition.z);
-
-            // Check if local coordinates are within chunk bounds
             if (localX >= 0 && localX < Chunk::chunkSize &&
                 localY >= 0 && localY < Chunk::chunkHeight &&
                 localZ >= 0 && localZ < Chunk::chunkSize) {
 
-                // Look up the block using the local coordinates
-                size_t index = chunk.getBlockIndex(localX, localY, localZ);
-                  
-                if (chunk.blocks[index] != BlockType::AIR) { 
-                    // Set highlighted block position
-                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z)); 
+                size_t index = chunk->getBlockIndex(localX, localY, localZ);
+                if (chunk->blocks[index] != BlockType::AIR) { // Fixed typo
+                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
                     hasHighlightedBlock = true;
-
-                    // Compute previous block position for normal calculation
                     glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
                     prevBlock = glm::vec3(floor(prevPos.x), floor(prevPos.y), floor(prevPos.z));
-
                     return;
                 }
             }
@@ -749,7 +749,7 @@ void Main::placeBlock() {
         glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
+        uint64_t key = getChunkKey(chunkPos.x/ CHUNK_SIZE, chunkPos.z/ CHUNK_SIZE);
         // Look up the chunk
         auto it = chunks.find(key);
         if (it != chunks.end()) {
@@ -779,7 +779,7 @@ void Main::breakBlock() {
         glm::vec3 chunkPos = glm::floor(highlightedBlockPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
 
-        uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
+        uint64_t key = getChunkKey(chunkPos.x/CHUNK_SIZE, chunkPos.z/ CHUNK_SIZE);
         // Look up the chunk
         auto it = chunks.find(key);;
         if (it != chunks.end()) {

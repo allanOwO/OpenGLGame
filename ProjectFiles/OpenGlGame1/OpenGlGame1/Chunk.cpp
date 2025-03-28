@@ -17,7 +17,9 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 
 	//use noise, with caching, from main
 	if (!main) std::cerr << "main nullptr" << "\n";
-	
+	 
+	std::lock_guard<std::mutex> lock(main->noiseMutex); 
+
 	for (int x = 0; x < chunkSize; x++) { 
 		for (int z = 0; z < chunkSize; z++) {
 
@@ -25,9 +27,8 @@ Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 			float worldZ = chunkPosition.z + z;
 
 			glm::ivec2 noiseKey(worldX, worldZ);
-			float height; 
-
-			std::lock_guard<std::mutex> lock(main->noiseMutex);
+			float height;
+			
 			//if noise cached
 			if (main->noiseCache.find(noiseKey) != main->noiseCache.end()) {
 				height = main->noiseCache[noiseKey];
@@ -204,9 +205,6 @@ void Chunk::generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsig
 		int localX = int(pos.x);
 		int localY = int(pos.y);
 		int localZ = int(pos.z);
-		if (localX < 0) localX += chunkSize;
-		if (localY < 0) localY += chunkHeight;
-		if (localZ < 0) localZ += chunkSize;
 
 		// Check neighboring faces using chunk-relative indexing
 		switch (f) {

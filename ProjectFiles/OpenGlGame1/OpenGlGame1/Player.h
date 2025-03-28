@@ -24,7 +24,7 @@ class Player
 {
 public:
 
-	Player(GLFWwindow* window);
+	Player(GLFWwindow* window, Main* main);
 	
 	void spawn(glm::vec3 spawnPos); 
 	void update(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks);
@@ -68,5 +68,6 @@ private:
 	AABB playerAABB = { glm::vec3(-0.3f, 0.0f, -0.3f), glm::vec3(0.3f, 1.8f, 0.3f) }; // Example size 
 	bool grounded;
 
+	Main* main;
 };
 
