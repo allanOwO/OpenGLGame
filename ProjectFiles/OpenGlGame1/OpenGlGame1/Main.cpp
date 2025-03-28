@@ -147,7 +147,12 @@ void Main::processInput(GLFWwindow* window)
 
 void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
-    lightShader = new Shader("lightVertexShader.glsl","lightFragShader.glsl");
+    sunShader = new Shader("sunVertex.glsl","sunFragment.glsl");
+
+    if (sunShader->ID == 0) {
+        std::cerr << "Sun shader failed to compile/link" << std::endl;
+    }
+    std::cout << "Sun shader ID: " << sunShader->ID << std::endl; // Verify ID 
 
     shader->use();  
     modelLocation = glGetUniformLocation(shader->ID, "model");
@@ -157,18 +162,27 @@ void Main::createShaders() {
     lightColourLoc = glGetUniformLocation(shader->ID, "lightColour");
     lightPosLoc = glGetUniformLocation(shader->ID, "lightPos"); // New
     sunDirLoc = glGetUniformLocation(shader->ID, "sunDirection");
+    camPosLoc = glGetUniformLocation(shader->ID, "cameraPos");
 
-    lightShader->use();
-    lightModelLocation = glGetUniformLocation(lightShader->ID, "model");
-    lightViewLocation = glGetUniformLocation(lightShader->ID, "view");
-    lightProjectionLocation = glGetUniformLocation(lightShader->ID, "projection");
+    sunShader->use();
+
+    GLint currentProgram;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+    if (currentProgram != sunShader->ID) {
+        std::cerr << "Sun shader not active after use(). Expected: " << sunShader->ID << ", Got: " << currentProgram << std::endl;
+    }
+
+    sunViewLoc = glGetUniformLocation(sunShader->ID, "view");
+    sunProjLoc = glGetUniformLocation(sunShader->ID, "projection");
+    sunSunDirLoc = glGetUniformLocation(sunShader->ID, "sunDirection");
+    sunColourLoc = glGetUniformLocation(sunShader->ID, "sunColour");
 
 }
 
 void Main::createCube() {
 
     float vertices[] = {
-        // positions          // colors           // texture coords
+        // positions          // colours           // texture coords
         // Back face
         -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
          0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
@@ -269,72 +283,6 @@ void Main::createCube() {
 
 }
 
-void Main::createLight() {
-
-    float vertices[] = {
-        // positions   
-        // Back face
-        -0.5f, -0.5f, -0.5f,
-         0.5f,  0.5f, -0.5f,
-         0.5f, -0.5f, -0.5f,
-         0.5f,  0.5f, -0.5f,
-        -0.5f, -0.5f, -0.5f,
-        -0.5f,  0.5f, -0.5f, 
-        // Front face
-        -0.5f, -0.5f,  0.5f,
-         0.5f, -0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,  
-        -0.5f,  0.5f,  0.5f,   
-        -0.5f, -0.5f,  0.5f,  
-        // Left face
-        -0.5f,  0.5f,  0.5f,   
-        -0.5f,  0.5f, -0.5f,   
-        -0.5f, -0.5f, -0.5f,   
-        -0.5f, -0.5f, -0.5f,   
-        -0.5f, -0.5f,  0.5f,  
-        -0.5f,  0.5f,  0.5f, 
-        // Right face
-         0.5f,  0.5f,  0.5f,   
-         0.5f, -0.5f, -0.5f, 
-         0.5f,  0.5f, -0.5f,  
-         0.5f, -0.5f, -0.5f, 
-         0.5f,  0.5f,  0.5f,  
-         0.5f, -0.5f,  0.5f, 
-         // Bottom face
-         -0.5f, -0.5f, -0.5f,  
-          0.5f, -0.5f, -0.5f, 
-          0.5f, -0.5f,  0.5f,   
-          0.5f, -0.5f,  0.5f,  
-         -0.5f, -0.5f,  0.5f,
-         -0.5f, -0.5f, -0.5f,   
-         // Top face
-         -0.5f,  0.5f, -0.5f,  
-          0.5f,  0.5f,  0.5f,   
-          0.5f,  0.5f, -0.5f,  
-          0.5f,  0.5f,  0.5f,   
-         -0.5f,  0.5f, -0.5f, 
-         -0.5f,  0.5f,  0.5f
-    };
-    //create vertex array object
-    glGenVertexArrays(1, &lightVAO);
-    glBindVertexArray(lightVAO);//bind VAO
-
-
-    //create vertex buffer object
-    glGenBuffers(1, &lightVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, lightVBO);//basically make GL_ARRAY_BUFFER work as a reference to vbo
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);//copy data (vertices) into the buffers memory
-
-    // Set the position attribute (first 3 floats in each vertex)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    //unblund vao
-    glBindVertexArray(0);
-
-}
-
 void Main::createHighlight() {
     float vertices[] = {
         -0.51f, -0.51f, -0.51f,  0.51f, -0.51f, -0.51f,
@@ -362,6 +310,34 @@ void Main::createHighlight() {
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
+}
+
+void Main::createSun() {
+    // Vertex data for sun quad
+    float sunVertices[] = {
+        -0.5f,  0.5f,  0.0f, 1.0f, // Top-left
+         0.5f,  0.5f,  1.0f, 1.0f, // Top-right
+         0.5f, -0.5f,  1.0f, 0.0f, // Bottom-right
+        -0.5f, -0.5f,  0.0f, 0.0f  // Bottom-left
+    };
+    unsigned int sunIndices[] = { 0, 1, 2, 2, 3, 0 };
+
+    glGenVertexArrays(1, &sunVAO);
+    glGenBuffers(1, &sunVBO);
+    glGenBuffers(1, &sunEBO);
+
+    glBindVertexArray(sunVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sunVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(sunVertices), sunVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sunEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(sunIndices), sunIndices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 }
@@ -400,6 +376,55 @@ void Main::drawChunks() {
     }
 }
 
+void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection) {
+
+    float sunAngle = glm::dot(sunDirection, glm::vec3(0.0f, 1.0f, 0.0f));
+    float transitionFactor = (sunAngle + 1.0f) * 0.5f;
+    glm::vec3 sunColour = glm::mix(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(1.0f, 0.5f, 0.0f), transitionFactor);
+
+    sunShader->use();
+    GLint currentProgram;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+    if (currentProgram != sunShader->ID) {
+        std::cerr << "Sun shader not active in renderSun(). Expected: " << sunShader->ID << ", Got: " << currentProgram << std::endl;
+    }
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after use: " << error << std::endl;
+
+    glUniformMatrix4fv(sunViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+    error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after view uniform: " << error << std::endl;
+
+    glUniformMatrix4fv(sunProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
+    error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after projection uniform: " << error << std::endl;
+
+    glUniform3fv(sunSunDirLoc, 1, glm::value_ptr(sunDirection));
+    error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after sunDirection uniform: " << error << std::endl;
+
+    glUniform3fv(sunColourLoc, 1, glm::value_ptr(sunColour));
+    error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after sunColour uniform: " << error << std::endl;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST); 
+
+    glBindVertexArray(sunVAO);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    error = glGetError();
+    if (error != GL_NO_ERROR) std::cerr << "Error after draw: " << error << std::endl;
+
+    glBindVertexArray(0); 
+    glEnable(GL_DEPTH_TEST); 
+    glDisable(GL_BLEND);  
+
+    // Debug: Print sun position
+    glm::vec3 sunPos = normalize(sunDirection) * 10.0f;
+    std::cout << "Sun position: (" << sunPos.x << ", " << sunPos.y << ", " << sunPos.z << ")" << std::endl;
+}
+
 void Main::render() {
 
     // set background & clear screen
@@ -407,7 +432,6 @@ void Main::render() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
 
     //vie and projection matrices
-    //lookat(position, target, up)
     glm::mat4 view = player->getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
      
@@ -415,34 +439,25 @@ void Main::render() {
     glm::mat4 viewProj = projection * view; 
     frustum.update(viewProj); // Update frustum for culling 
 
-    //use light shader for light
-    lightShader->use();
-
-    glm::mat4 lightModel = glm::mat4(1.0f); 
-    lightModel = glm::translate(lightModel,mainLightPos); 
-    lightModel = glm::scale(lightModel, glm::vec3(0.2f));
-    //pass view and projection matrices to shader
-    glUniformMatrix4fv(lightModelLocation, 1, GL_FALSE, glm::value_ptr(lightModel)); 
-    glUniformMatrix4fv(lightViewLocation, 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(lightProjectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
-    //draw light cube  
-    glBindVertexArray(lightVAO); 
-    glDrawArrays(GL_TRIANGLES, 0, 36); 
-    glBindVertexArray(0); 
-
-
     // Rotate sun direction based on time
     float time = glfwGetTime();
     float angle = time * 0.5f; // Adjust speed (0.1f = slow rotation, increase for faster)
-    glm::vec3 baseSunDirection = glm::vec3(0.0f, -1.0f, -1.0f); // Starting direction
-    sunDirection = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(1.0f, 0.0f, 0.0f))) * baseSunDirection;
-    sunDirection = glm::normalize(sunDirection); // Ensure it stays a unit vector 
+    glm::vec3 baseSunDirection = glm::vec3(1.0f, 0.0f, 0.0f); // Starting direction in east
+
+    // Rotate around Y-axis for east-west motion
+    glm::vec3 horizontalDir = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0.0f, 1.0f, 0.0f))) * baseSunDirection;
+    // Add height variation
+    float height = sin(angle); // Ranges from -1 to 1
+    sunDirection = glm::normalize(glm::vec3(horizontalDir.x, height, horizontalDir.z));
+    std::cout << "sunDirection: (" << sunDirection.x << ", " << sunDirection.y << ", " << sunDirection.z << ")" << std::endl;
+
 
     //use normal shader for cube + chunks
     shader->use(); 
     // pass view and projection matrices to shader
     glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+    glUniform3fv(camPosLoc, 1, glm::value_ptr(player->getCameraPos()));
     
     //model matrice for rotating cube
     glm::mat4 cubeModel = glm::mat4(1.0f);
@@ -478,6 +493,8 @@ void Main::render() {
         glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0); // 24 indices for wireframe
         glBindVertexArray(0);
     }
+
+    renderSun(view,projection,sunDirection); 
 }
 
 
@@ -1019,10 +1036,9 @@ void Main::processChunkMeshingInOrder() {
 void Main::run() {
 
     createCube();
-    createLight();
+    createSun();
 
-    getTextures(); 
-    //addChunks(); 
+    getTextures();  
     createShaders();
     createHighlight();
 

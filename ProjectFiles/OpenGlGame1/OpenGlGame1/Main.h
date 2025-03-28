@@ -50,15 +50,16 @@ private:
 	void init(); // Initialize GLFW, GLAD, etc.
 	void createShaders();
 	void createCube();
-	void createLight();
+	void createSun();
+	void renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection); 
 	void render();
 	void getTextures();
 	void doFps();
 	void processInput(GLFWwindow* window);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc;
-	unsigned int lightModelLocation, lightViewLocation, lightProjectionLocation;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc, camPosLoc;
+	unsigned int sunViewLoc, sunProjLoc ,sunColourLoc, sunSunDirLoc;
 	glm::vec3 mainLightPos = glm::vec3(0, 20, 10);
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
 
@@ -70,9 +71,9 @@ private:
 
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
-	unsigned int lightVBO, lightVAO;
+	unsigned int sunVBO, sunVAO, sunEBO;
 	Shader* shader;
-	Shader* lightShader;
+	Shader* sunShader;
 	std::map<BlockType, GLuint> textureMap;
 
 	//chunk stuff
