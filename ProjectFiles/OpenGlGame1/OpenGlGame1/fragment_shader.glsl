@@ -34,9 +34,10 @@ void main()
     vec3 norm = normalize(Normal);
     vec3 lightDir = normalize(-sunDirection);
     
-    if(lightDir.y > 0.0f){
+    //smoothly disables light when crossing horizon
+    float lightFactor = smoothstep(0.0,0.1,lightDir.y);
         
-        float diff = max(dot(norm, lightDir),0.0f);
+        float diff = max(dot(norm, lightDir),0.0f) * lightFactor;
         diffuse = diff * sunColour;
 
         // Specular lighting
@@ -44,9 +45,9 @@ void main()
         float specularStrength = 0.75f;
         vec3 viewDir = normalize(cameraPos - FragPos); // Camera position should be passed to the shader
         vec3 reflectDir = reflect(-lightDir, norm); // Reflection of light direction
-        float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess) * lightFactor;
         specular = specularStrength * spec * sunColour; 
-    }
+    
 
     
 
