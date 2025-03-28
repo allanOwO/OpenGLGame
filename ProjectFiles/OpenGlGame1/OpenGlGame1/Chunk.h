@@ -9,12 +9,11 @@
 #include "BlockType.h"
 #include "MeshData.h"
 
+
 struct Block
 {
 	BlockType type;
 };
-
-
 
 class Main;//forward declaration
 
@@ -100,10 +99,14 @@ public:
 
 private:
 	
-	void generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos); 
+	void generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos);
 	bool isBlockSolid(int x, int y, int z);
 	void cacheNeighbors();
  
 	Chunk* neighbors[4]; // +X, -X, +Z, -Z 
+
+	//pre made faces, texcoords, and normals, saves re making them per block
+	//stored in "blockConstants.cpp"
+
 };
 

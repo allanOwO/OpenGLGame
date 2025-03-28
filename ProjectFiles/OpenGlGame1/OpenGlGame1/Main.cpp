@@ -178,6 +178,7 @@ void Main::createShaders() {
     sunProjLoc = glGetUniformLocation(sunShader->ID, "projection");
     sunSunDirLoc = glGetUniformLocation(sunShader->ID, "sunDirection");
     sunColourLoc = glGetUniformLocation(sunShader->ID, "sunColour");
+    sunCamPosLoc = glGetUniformLocation(sunShader->ID, "camPos");
 
 }
 
@@ -391,6 +392,7 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
     glUniformMatrix4fv(sunProjLoc, 1, GL_FALSE, glm::value_ptr(projection));  
     glUniform3fv(sunSunDirLoc, 1, glm::value_ptr(sunDirection));
     glUniform3fv(sunColourLoc, 1, glm::value_ptr(sunColour));
+    glUniform3fv(sunCamPosLoc, 1, glm::value_ptr(player->getCameraPos()));
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -817,19 +819,6 @@ void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
                 MeshData newMesh = it->second.get();
                 chunkMeshFutures.erase(it);
                 activeAsyncTasks--;
-
-                /*
-                {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cout << "Completed async task for chunk " << glm::to_string(chunk.chunkPosition)
-                        << ". Active tasks: " << activeAsyncTasks << std::endl;
-                    std::cout << "Mesh data: " << newMesh.verticesByType.size() << " types, ";
-                    for (const auto& pair : newMesh.indicesByType) {
-                        std::cout << pair.second.size() << " indices for type " << static_cast<int>(pair.first) << ", ";
-                    }
-                    std::cout << std::endl;
-                }
-                */
 
                 chunk.verticesByType = std::move(newMesh.verticesByType);
                 chunk.indicesByType = std::move(newMesh.indicesByType);

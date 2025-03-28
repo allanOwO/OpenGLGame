@@ -5,6 +5,7 @@
 #include <glm/vec2.hpp>
 
 #include "Main.h"//need for full main deffinition
+#include "BlockConstants.h"
 
 Chunk::Chunk(glm::vec3 position,int seed, Main* m)
 	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR), currentTallestBlock(0),
@@ -171,35 +172,76 @@ MeshData Chunk::generateMeshData() {
 
 	int localMaxHeight = 0; // Maximum Y value of non-air blocks in this chunk
 
+	// Step 1: Counting pass to determine visible faces per block type
+	std::map<BlockType, int> faceCount;
+
 	for (int x = 0; x < chunkSize; x++) {
 		for (int y = 0; y < chunkHeight; y++) {
 			for (int z = 0; z < chunkSize; z++) {
 				size_t index = getBlockIndex(x, y, z);
 				if (blocks[index] == BlockType::AIR) continue; // Skip air blocks
 
+				BlockType type = blocks[index];
+
+				// Check visibility of each face
+				if (!isBlockSolid(x + 0, y + 0, z - 1)) faceCount[type]++; // Front 
+				if (!isBlockSolid(x + 0, y + 0, z + 1)) faceCount[type]++; // Back
+				if (!isBlockSolid(x - 1, y + 0, z + 0)) faceCount[type]++; // Left  
+				if (!isBlockSolid(x + 1, y + 0, z + 0)) faceCount[type]++; // Right 
+				if (!isBlockSolid(x + 0, y + 1, z + 0)) faceCount[type]++; // Top 
+				if (!isBlockSolid(x + 0, y - 1, z + 0)) faceCount[type]++; // Bottom 
+
 				// Update max height
-				localMaxHeight = std::max(localMaxHeight, y); 
+				localMaxHeight = std::max(localMaxHeight, y);
+			}
+		}
+	} 
 
-				// Basic occlusion culling: skip fully surrounded blocks
-				bool isSurrounded = true;
-				for (int dx = -1; dx <= 1; dx += 2) {
-					if (!isBlockSolid(x + dx, y, z)) { isSurrounded = false; break; }
-				}
-				if (isSurrounded) {
-					for (int dy = -1; dy <= 1; dy += 2) {
-						if (!isBlockSolid(x, y + dy, z)) { isSurrounded = false; break; }
-					}
-				}
-				if (isSurrounded) {
-					for (int dz = -1; dz <= 1; dz += 2) {
-						if (!isBlockSolid(x, y, z + dz)) { isSurrounded = false; break; }
-					}
-				}
-				if (isSurrounded) continue; // Skip fully occluded blocks
+	//Step 2: Reserve space in vectors based on face counts
+    for (const auto& pair : faceCount) {
+        BlockType type = pair.first;
+        int faces = pair.second;
+        meshData.verticesByType[type].resize(faces * 4 * 11); // 4 vertices * 11 floats each
+        meshData.indicesByType[type].resize(faces * 6);       // 6 indices per face
+    }
 
-				std::vector<float>& vertices = meshData.verticesByType [blocks[index]];
-				std::vector<unsigned int>& indices = meshData.indicesByType[blocks[index]];
-				generateBlockFaces(vertices, indices, glm::ivec3(x,y,z));
+	//gen mesh using pointers
+	for (auto& pair : meshData.verticesByType) {
+		BlockType type = pair.first;
+		std::vector<float>& vertices = pair.second;
+		std::vector<unsigned int>& indices = meshData.indicesByType[type];
+
+		//pointers to the start of the vectors
+		float* vertexPtr = vertices.data();
+		unsigned int* indexPtr = indices.data();
+		unsigned int baseVertexIndex = 0;
+
+		for (int x = 0; x < chunkSize; x++) {
+			for (int y = 0; y < chunkHeight; y++) {
+				for (int z = 0; z < chunkSize; z++) {
+					size_t index = getBlockIndex(x, y, z);
+					if (blocks[index] != type || blocks[index] == BlockType::AIR) continue;
+
+					// Basic occlusion culling: skip fully surrounded blocks
+					bool isSurrounded = true;
+					for (int dx = -1; dx <= 1 && isSurrounded; dx += 2) {
+						if (!isBlockSolid(x + dx, y, z)) { isSurrounded = false; break; }
+					}
+					if (isSurrounded) {
+						for (int dy = -1; dy <= 1 && isSurrounded; dy += 2) {
+							if (!isBlockSolid(x, y + dy, z)) { isSurrounded = false; break; }
+						}
+					}
+					if (isSurrounded) {
+						for (int dz = -1; dz <= 1 && isSurrounded; dz += 2) {
+							if (!isBlockSolid(x, y, z + dz)) { isSurrounded = false; break; }
+						}
+					}
+					if (isSurrounded) continue;
+
+					// Generate faces for this block using pointers
+					generateBlockFaces(vertexPtr, indexPtr, baseVertexIndex, glm::ivec3(x, y, z));
+				}
 			}
 		}
 	}
@@ -207,56 +249,25 @@ MeshData Chunk::generateMeshData() {
 	return meshData;
 }
 
-void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigned int>& indices, const glm::ivec3 blockPos) {
+void Chunk::generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos) {
 
 	//block position in chunk local space
 	glm::vec3 pos = blockPos;
-
 	float size = 1.0f;
 	glm::vec3 color(0.5f, 0.5f, 0.5f);//default colour
 	if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
 		color = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
 	}
 
-	// Cube vertices positions (8 unique)
-	glm::vec3 cubeVertices[8] = {
-		{pos.x, pos.y, pos.z}, {pos.x + size, pos.y, pos.z},
-		{pos.x + size, pos.y + size, pos.z}, {pos.x, pos.y + size, pos.z},
-		{pos.x, pos.y, pos.z + size}, {pos.x + size, pos.y, pos.z + size},
-		{pos.x + size, pos.y + size, pos.z + size}, {pos.x, pos.y + size, pos.z + size}
-	};
-
-	// Correct UVs per face (not per-vertex)
-	float texCoords[4][2] = {
-		{0.0f, 0.0f}, {1.0f, 0.0f},
-		{1.0f, 1.0f}, {0.0f, 1.0f}
-	};
-
-	// Normals per face
-	glm::vec3 normals[6] = {
-		{0.0f, 0.0f, -1.0f}, // Front
-		{0.0f, 0.0f, 1.0f},  // Back
-		{-1.0f, 0.0f, 0.0f}, // Left
-		{1.0f, 0.0f, 0.0f},  // Right
-		{0.0f, 1.0f, 0.0f},  // Top
-		{0.0f, -1.0f, 0.0f}  // Bottom
-	}; 
-
-	// Face definitions (6 faces, each using 4 unique vertices)
-	int faces[6][4] = {
-	{3, 2, 1, 0}, // Front
-	{6, 7, 4, 5}, // Back
-	{7, 3, 0, 4}, // Left
-	{2, 6, 5, 1}, // Right
-	{7, 6, 2, 3}, // Top
-	{0, 1, 5, 4}  // Bottom
-	};
-
-	unsigned int baseIndex = vertices.size() / 11;
+	// Create an array of cube vertices for this block using the precomputed unit cube vertices.
+	// For each vertex, add the block position to the unit cube vertex, scaled by size. 
+	glm::vec3 cubeVertices[8]; 
+	for (int i = 0; i < 8; i++) { 
+		cubeVertices[i] = unitCubeVertices[i] * size + pos; 
+	}
 
 	// Add vertices per face
 	for (int f = 0; f < 6; f++) {
-		int* face = faces[f];
 
 		// Check if the face should be culled (hidden)
 		bool cullFace = false;
@@ -278,38 +289,33 @@ void Chunk::generateBlockFaces(std::vector<float>& vertices, std::vector<unsigne
 		case 4: cullFace = isBlockSolid(localX, localY + 1, localZ); break; // Top
 		case 5: cullFace = isBlockSolid(localX, localY - 1, localZ); break; // Bottom
 		}
-
-
 		// Skip adding the face if it is culled
 		if (cullFace) continue;
 
 		// Add 4 vertices for the current face
 		for (int i = 0; i < 4; i++) {
-			vertices.push_back(cubeVertices[face[i]].x);
-			vertices.push_back(cubeVertices[face[i]].y);
-			vertices.push_back(cubeVertices[face[i]].z);
-			vertices.push_back(color.r);
-			vertices.push_back(color.g);
-			vertices.push_back(color.b);
-			vertices.push_back(texCoords[i][0]);
-			vertices.push_back(texCoords[i][1]);
-			vertices.push_back(normals[f].x); // Add normal
-			vertices.push_back(normals[f].y);
-			vertices.push_back(normals[f].z); 
+			*vertexPtr++ = cubeVertices[faces[f][i]].x; // Position X
+			*vertexPtr++ = cubeVertices[faces[f][i]].y; // Position Y
+			*vertexPtr++ = cubeVertices[faces[f][i]].z; // Position Z
+			*vertexPtr++ = color.r;                     // Color R
+			*vertexPtr++ = color.g;                     // Color G
+			*vertexPtr++ = color.b;                     // Color B
+			*vertexPtr++ = texCoords[i][0];             // Texture U
+			*vertexPtr++ = texCoords[i][1];             // Texture V
+			*vertexPtr++ = normals[f].x;                // Normal X
+			*vertexPtr++ = normals[f].y;                // Normal Y
+			*vertexPtr++ = normals[f].z;                // Normal Z
 		} 
 
-		// Add two triangles per face
-		indices.push_back(baseIndex);
-		indices.push_back(baseIndex + 1);
-		indices.push_back(baseIndex + 2);
+		// Write 6 indices (two triangles) for this face
+		*indexPtr++ = baseVertexIndex;     // Triangle 1
+		*indexPtr++ = baseVertexIndex + 1;
+		*indexPtr++ = baseVertexIndex + 2;
+		*indexPtr++ = baseVertexIndex;     // Triangle 2
+		*indexPtr++ = baseVertexIndex + 2;
+		*indexPtr++ = baseVertexIndex + 3;
 
-		indices.push_back(baseIndex);
-		indices.push_back(baseIndex + 2);
-		indices.push_back(baseIndex + 3);
-
-		baseIndex += 4; // Move index forward (4 per face)
-
-		
+		baseVertexIndex += 4; // Increment for the next face		
 	}
 }
 

@@ -59,7 +59,7 @@ private:
 
 	std::string loadShader(const char* filepath);
 	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc, camPosLoc;
-	unsigned int sunViewLoc, sunProjLoc ,sunColourLoc, sunSunDirLoc;
+	unsigned int sunViewLoc, sunProjLoc ,sunColourLoc, sunSunDirLoc, sunCamPosLoc;
 	glm::vec3 mainLightPos = glm::vec3(0, 20, 10);
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
 
