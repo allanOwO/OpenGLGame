@@ -20,9 +20,15 @@ void main()
     vec3 diffuse = vec3(0,0,0);
     vec3 specular = vec3(0,0,0);
 
+    
+    //ambient occlusion, darkens side faces, keeps tops light
+    float ao = clamp((Normal.y + 1.0) * 0.5, 0.0, 1.0);  // Range 0..1
+    
+    float aoFactor = mix(0.5, 1.0, ao);
+
     //ambient
     float ambientStrength = 0.3;
-    vec3 ambient = ambientStrength * sunColour;
+    vec3 ambient = ambientStrength * sunColour * aoFactor;
 
     //directional
     vec3 norm = normalize(Normal);

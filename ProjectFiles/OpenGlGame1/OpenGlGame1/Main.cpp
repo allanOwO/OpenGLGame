@@ -14,6 +14,7 @@
 #define CHUNK_SIZE 16
 #define RENDER_DISTANCE 8
 #define SUN_TILT glm::radians(70.0f)
+#define SUN_SPEED 0.3f
 
 FastNoiseLite Main::noiseGen;
 std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
@@ -419,7 +420,7 @@ void Main::render() {
 
     // Rotate sun direction based on time
     float time = glfwGetTime();
-    float angle = time * 0.5f; // Adjust speed (0.1f = slow rotation, increase for faster)
+    float angle = time * SUN_SPEED; // Adjust speed (0.1f = slow rotation, increase for faster)
 
     // Compute sun direction using a circular motion
     glm::vec3 sunDir = glm::normalize(glm::vec3(
@@ -474,27 +475,6 @@ void Main::render() {
     }
 
     renderSun(view,projection,-sunDirection); 
-}
-
-
-void Main::addChunks() {
-
-   
-    
-    for (int x = -1; x <1; x++) {
-        for (int z = -1; z < 1; z++) {
-            glm::vec3 chunkPos = glm::vec3(static_cast<int>(x * Chunk::chunkSize),
-                -Chunk::baseTerrainHeight,
-                static_cast<int>(z * Chunk::chunkSize));
-            // Create a new chunk at (x, 0, z), gen mesh
-            chunks.emplace(chunkPos,Chunk(chunkPos,seed,this));
-            updateChunkMeshAsync(chunks.at(chunkPos));
-
-            // Add a new model matrix for this chunk (initially an identity matrix)
-            chunkModels.emplace_back(glm::translate(glm::mat4(1.0f),chunkPos));
-        }
-    }
-
 }
 
 void Main::generateChunk(const glm::vec3& pos) {

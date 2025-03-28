@@ -93,7 +93,6 @@ private:
 	void generateChunk(const glm::vec3& pos);
 	void generateChunkAsync(const glm::vec3& pos);
 	void tryApplyChunkGeneration();
-	void addChunks();
 	void drawChunks();
 	int seed = -1;
 	void updateChunkMeshAsync(Chunk& chunk);
