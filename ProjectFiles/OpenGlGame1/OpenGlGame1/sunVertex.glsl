@@ -10,7 +10,7 @@ uniform vec3 sunDirection;
 
 void main()
 {
-    vec3 sunPos = normalize(sunDirection) * 50.0; // Far away in sun direction
+    vec3 sunPos = normalize(sunDirection) * 500.0; // Far away in sun direction
    // vec3 sunPos = vec3(0,100,0);
 
     mat4 billboard = mat4(
@@ -19,6 +19,6 @@ void main()
         vec4(view[0][2], view[1][2], view[2][2], 0.0), // Forward
         vec4(sunPos, 1.0)
     );
-    gl_Position = projection * view * billboard * vec4(aPos * 5.0, 0.0, 1.0); // Scale sun size with * 2.0
+    gl_Position = projection * view * billboard * vec4(aPos * 50.0, 0.0, 1.0); // Scale sun size with * 2.0
     TexCoord = aTexCoord;
 }

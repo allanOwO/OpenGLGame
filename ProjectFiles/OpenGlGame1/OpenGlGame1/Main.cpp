@@ -13,6 +13,7 @@
 
 #define CHUNK_SIZE 16
 #define RENDER_DISTANCE 8
+#define SUN_TILT glm::radians(70.0f)
 
 FastNoiseLite Main::noiseGen;
 std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
@@ -379,7 +380,7 @@ void Main::drawChunks() {
 void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection) {
 
     float sunAngle = glm::dot(sunDirection, glm::vec3(0.0f, 1.0f, 0.0f));
-    float transitionFactor = (sunAngle + 1.0f) * 0.5f;
+    float transitionFactor = (-sunAngle + 1.0f) * 0.5f;
     glm::vec3 sunColour = glm::mix(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(1.0f, 0.5f, 0.0f), transitionFactor);
 
     sunShader->use();
@@ -392,7 +393,7 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST); 
+    //glDisable(GL_DEPTH_TEST); 
 
     glBindVertexArray(sunVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -420,14 +421,11 @@ void Main::render() {
     float time = glfwGetTime();
     float angle = time * 0.5f; // Adjust speed (0.1f = slow rotation, increase for faster)
 
-    // Define a tilt for more natural movement
-    float tiltAngle = glm::radians(77.5f);
-
     // Compute sun direction using a circular motion
     glm::vec3 sunDir = glm::normalize(glm::vec3(
         cos(angle),                      // Moves left/right (X)
-        sin(angle) * sin(tiltAngle),      // Moves up/down (Y) with tilt
-        sin(angle) * cos(tiltAngle)       // Moves forward/backward (Z)
+        sin(angle) * sin(SUN_TILT),      // Moves up/down (Y) with tilt
+        sin(angle) * cos(SUN_TILT)       // Moves forward/backward (Z)
     ));
 
     // Set the sun direction
