@@ -9,6 +9,9 @@
 #include "BlockType.h"
 #include "MeshData.h"
 
+#include "VertexPacking.h"
+#include <glm/packing.hpp> 
+
 
 struct Block
 {
@@ -29,7 +32,7 @@ public:
 	int currentTallestBlock;//for fustrum culling , avoids it detecting air as in culling view
 	bool isActive = true;
 
-	Chunk(glm::vec3 position, int seed, Main* m = nullptr);//constructor
+	Chunk(glm::ivec3 position, int seed, Main* m = nullptr);//constructor
 	~Chunk();
 	// Delete copy constructor and copy assignment operator
 	Chunk(const Chunk&) = delete; 
@@ -87,7 +90,7 @@ public:
 
 	unsigned int VBO, VAO, EBO;
 
-	std::map<BlockType, std::vector<float>> verticesByType; 
+	std::map < BlockType, std::vector <PackedVertex>> verticesByType;//vertexes packed to 16bytes
 	std::map<BlockType, std::vector<unsigned int>> indicesByType; 
 	std::map<BlockType, unsigned int> baseIndicesByType; // Track base index per type 
 	glm::vec3 chunkPosition;
@@ -99,7 +102,7 @@ public:
 
 private:
 	
-	void generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos);
+	void generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos);
 	bool isBlockSolid(int x, int y, int z); 
 	void cacheNeighbors();
  

@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 32
+#define RENDER_DISTANCE 0
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.3f
 
@@ -21,7 +21,7 @@ std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache;
 
 
 Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
-                , isInitialLoading(true), currentLoadingRadius(4), maxLoadingRadius(RENDER_DISTANCE) {
+                , isInitialLoading(true), currentLoadingRadius(0), maxLoadingRadius(RENDER_DISTANCE) {
 
     init();
     player = std::make_unique<Player>(window,this);  // Use smart pointer for automatic cleanup;//give window to player
@@ -40,10 +40,10 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
 
     int range = CHUNK_SIZE * RENDER_DISTANCE;
 
-    for (float x = -range; x < range; x++) {
-        for (float z = -range; z < range; z++) {
+    for (int x = -range; x < range; x++) {
+        for (int z = -range; z < range; z++) {
 
-            noiseCache[{x, z}] = noiseGen.GetNoise(x,z);  // Fixed value 
+            noiseCache[{x, z}] = noiseGen.GetNoise(static_cast<float>(x), static_cast<float>(z));  // Fixed value 
         }
     }
     
@@ -111,10 +111,10 @@ void Main::init() {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     //some opengl settings
-    glEnable(GL_CULL_FACE);   // Enable face culling 
-    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    //glEnable(GL_CULL_FACE);   // Enable face culling 
+    //glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
-    glEnable(GL_DEPTH_TEST); 
+    //glEnable(GL_DEPTH_TEST); 
     glfwSwapInterval(0);// 1 = V-Sync on, 0 = V-Sync off 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
@@ -160,7 +160,7 @@ void Main::createShaders() {
     modelLocation = glGetUniformLocation(shader->ID, "model");
     viewLocation = glGetUniformLocation(shader->ID, "view");
     projectionLocation = glGetUniformLocation(shader->ID, "projection");
-    textureLocation = glGetUniformLocation(shader->ID, "texture1");
+    textureLocation = glGetUniformLocation(shader->ID, "ourTexture");
     lightColourLoc = glGetUniformLocation(shader->ID, "lightColour");
     lightPosLoc = glGetUniformLocation(shader->ID, "lightPos"); // New
     sunDirLoc = glGetUniformLocation(shader->ID, "sunDirection");
@@ -265,7 +265,7 @@ void Main::createCube() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0); 
     glEnableVertexAttribArray(0); 
 
-    // Set the color attribute (next 3 floats in each vertex)
+    // Set the colour attribute (next 3 floats in each vertex)
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); 
     glEnableVertexAttribArray(1); 
 
@@ -346,6 +346,8 @@ void Main::createSun() {
 }
 
 void Main::drawChunks() { 
+    shader->use();
+
     std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
     for (const auto& pair : chunks) {
         
@@ -410,7 +412,7 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
 void Main::render() {
 
     // set background & clear screen
-    glClearColor(0.1, 0.4, 0.6, 1);
+    glClearColor(0.1f, 0.4f, 0.6f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
 
     //vie and projection matrices
@@ -819,123 +821,63 @@ void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
     auto it = chunkMeshFutures.find(chunk.chunkPosition);
     if (it != chunkMeshFutures.end()) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            try {
-                MeshData newMesh = it->second.get();
-                chunkMeshFutures.erase(it);
-                activeAsyncTasks--;
 
-                chunk.verticesByType = std::move(newMesh.verticesByType);
-                chunk.indicesByType = std::move(newMesh.indicesByType);
-                chunk.baseIndicesByType = std::move(newMesh.baseIndicesByType);
+            MeshData newMesh = it->second.get();
+            chunkMeshFutures.erase(it);
+            activeAsyncTasks--;
 
-                std::vector<float> allVertices;
-                std::vector<unsigned int> allIndices;
-                unsigned int vertexOffset = 0;
-                unsigned int indexOffset = 0;
-                for (auto& pair : chunk.verticesByType) {
-                    BlockType type = pair.first;
-                    chunk.baseIndicesByType[type] = indexOffset;
-                    allVertices.insert(allVertices.end(), pair.second.begin(), pair.second.end());
-                    for (unsigned int idx : chunk.indicesByType[type]) {
-                        allIndices.push_back(idx + vertexOffset / 11);
-                    }
-                    vertexOffset += pair.second.size();
-                    indexOffset += chunk.indicesByType[type].size();
+            chunk.verticesByType = std::move(newMesh.packedVerticesByType);
+            chunk.indicesByType = std::move(newMesh.indicesByType);
+            chunk.baseIndicesByType = std::move(newMesh.baseIndicesByType);
+
+            std::vector<PackedVertex> allVertices;
+            std::vector<unsigned int> allIndices;
+            unsigned int vertexOffset = 0;
+            unsigned int indexOffset = 0;
+            for (auto& pair : chunk.verticesByType) {
+                BlockType type = pair.first;
+                chunk.baseIndicesByType[type] = indexOffset;
+                allVertices.insert(allVertices.end(), pair.second.begin(), pair.second.end());
+                for (unsigned int idx : chunk.indicesByType[type]) {
+                    allIndices.push_back(idx + vertexOffset);
                 }
-
-                // Check if buffers are valid
-                if (chunk.VAO == 0 || chunk.VBO == 0 || chunk.EBO == 0) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "Invalid VAO/VBO/EBO for chunk " << glm::to_string(chunk.chunkPosition) << std::endl;
-                    return;
-                }
-
-                glBindVertexArray(chunk.VAO);
-                GLenum error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBindVertexArray: " << error << std::endl;
-                }
-
-                glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBindBuffer(GL_ARRAY_BUFFER): " << error << std::endl;
-                }
-
-                glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(float), allVertices.data(), GL_STATIC_DRAW);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBufferData(GL_ARRAY_BUFFER): " << error << std::endl;
-                }
-
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk.EBO);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBindBuffer(GL_ELEMENT_ARRAY_BUFFER): " << error << std::endl;
-                }
-
-                glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_STATIC_DRAW);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBufferData(GL_ELEMENT_ARRAY_BUFFER): " << error << std::endl;
-                }
-
-                // Changed normals to GL_FLOAT for compatibility
-                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
-                glEnableVertexAttribArray(0);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after setting attribute 0: " << error << std::endl;
-                }
-
-                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
-                glEnableVertexAttribArray(1);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after setting attribute 1: " << error << std::endl;
-                }
-
-                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
-                glEnableVertexAttribArray(2);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after setting attribute 2: " << error << std::endl;
-                }
-
-                glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float)));
-                glEnableVertexAttribArray(3);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after setting attribute 3: " << error << std::endl;
-                }
-
-                glBindVertexArray(0);
-                error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    std::lock_guard<std::mutex> lock(logMutex);
-                    std::cerr << "OpenGL Error after glBindVertexArray(0): " << error << std::endl;
-                }
-
-                chunk.fullRebuildNeeded = false;
+                vertexOffset += pair.second.size();
+                indexOffset += chunk.indicesByType[type].size();
             }
 
-
-            catch (const std::exception& e) {
+            // Check if buffers are valid
+            if (chunk.VAO == 0 || chunk.VBO == 0 || chunk.EBO == 0) {
                 std::lock_guard<std::mutex> lock(logMutex);
-                std::cerr << "Error retrieving future for chunk " << glm::to_string(chunk.chunkPosition)
-                    << ": " << e.what() << std::endl;
-                chunkMeshFutures.erase(it);
-                activeAsyncTasks--;
+                std::cerr << "Invalid VAO/VBO/EBO for chunk " << glm::to_string(chunk.chunkPosition) << std::endl;
+                return;
             }
+
+            glBindVertexArray(chunk.VAO);
+            glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
+
+
+            glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(PackedVertex), allVertices.data(), GL_DYNAMIC_DRAW);
+
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk.EBO);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_DYNAMIC_DRAW);
+
+
+            
+            glVertexAttribIPointer(0, 3, GL_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, pos)); 
+            glVertexAttribIPointer(1, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, colour)); 
+            glVertexAttribIPointer(2, 2, GL_UNSIGNED_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, tex)); 
+            glVertexAttribIPointer(3, 1, GL_INT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, normal)); 
+
+            glEnableVertexAttribArray(0);
+            glEnableVertexAttribArray(1);
+            glEnableVertexAttribArray(2);
+            glEnableVertexAttribArray(3);
+             
+
+            glBindVertexArray(0);
+
+
+            chunk.fullRebuildNeeded = false;                        
         }
     }
 }
@@ -1027,6 +969,8 @@ void Main::run() {
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+   
 
 }
 

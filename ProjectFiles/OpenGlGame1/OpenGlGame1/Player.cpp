@@ -120,10 +120,6 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, 
     {
         std::lock_guard<std::recursive_mutex> lock(main->chunksMutex);
 
-        // Step 1: Resolve X-axis
-        newPos.x += velocity.x * deltaTime;
-        AABB playerBox = { newPos + playerAABB.min, newPos + playerAABB.max };
-
         // Determine chunk bounds playerBox spans
         glm::vec3 minChunkPos = glm::floor(playerBox.min / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         glm::vec3 maxChunkPos = glm::floor(playerBox.max / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
@@ -249,13 +245,16 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, 
                                 chunkPos + glm::vec3(localX + 1, localY + 1, localZ + 1)
                             };
                             if (intersects(playerBox, blockBox)) {
-                                if (velocity.y > 0) {
-                                    newPos.y = blockBox.min.y - playerAABB.max.y - 0.001f;
-                                    grounded = true;
-                                }
-                                else if (velocity.y < 0) {
+                                if (velocity.y < 0) { // Falling
                                     newPos.y = blockBox.max.y - playerAABB.min.y + 0.001f;
+                                     
+                                    grounded = true; 
                                 }
+                                else if (velocity.y > 0) { // Jumping 
+                                    newPos.y = blockBox.min.y - playerAABB.max.y - 0.001f; 
+                                     
+                                }
+                               
                                 velocity.y = 0.0f;
                             }
                         }
@@ -268,8 +267,6 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, 
     // Update position
     bodyPos = newPos;
     cameraPos = bodyPos + glm::vec3(0.0f, eyeLevel, 0.0f);  // Recalculate the camera position as an offset
-    
-
     
 }
 

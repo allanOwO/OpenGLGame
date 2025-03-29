@@ -7,7 +7,8 @@
 #include "Main.h"//need for full main deffinition
 #include "BlockConstants.h"
 
-Chunk::Chunk(glm::vec3 position,int seed, Main* m)
+
+Chunk::Chunk(glm::ivec3 position,int seed, Main* m)
 	: chunkPosition(position),main(m),fullRebuildNeeded(true),blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR), currentTallestBlock(0),
 		VAO(0), VBO(0), EBO(0) {
 
@@ -130,18 +131,18 @@ MeshData Chunk::generateMeshData() {
     for (const auto& pair : faceCount) {
         BlockType type = pair.first;
         int faces = pair.second;
-        meshData.verticesByType[type].resize(faces * 4 * 11); // 4 vertices * 11 floats each
+        meshData.packedVerticesByType[type].resize(faces * 4); // 4 vertices 
         meshData.indicesByType[type].resize(faces * 6);       // 6 indices per face
     }
 
 	//gen mesh using pointers
-	for (auto& pair : meshData.verticesByType) {
+	for (auto& pair : meshData.packedVerticesByType) {
 		BlockType type = pair.first;
-		std::vector<float>& vertices = pair.second;
+		std::vector<PackedVertex>& vertices = pair.second; 
 		std::vector<unsigned int>& indices = meshData.indicesByType[type];
 
 		//pointers to the start of the vectors
-		float* vertexPtr = vertices.data();
+		PackedVertex* vertexPtr = vertices.data();
 		unsigned int* indexPtr = indices.data();
 		unsigned int baseVertexIndex = 0;
 
@@ -178,14 +179,14 @@ MeshData Chunk::generateMeshData() {
 	return meshData;
 }
 
-void Chunk::generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos) {
+void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos) {
 
 	//block position in chunk local space
 	glm::vec3 pos = blockPos;
 	float size = 1.0f;
-	glm::vec3 color(0.5f, 0.5f, 0.5f);//default colour
+	glm::vec3 colour(0.5f, 0.5f, 0.5f);//default colour
 	if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
-		color = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
+		colour = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
 	}
 
 	// Create an array of cube vertices for this block using the precomputed unit cube vertices.
@@ -202,9 +203,9 @@ void Chunk::generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsig
 		bool cullFace = false;
 
 		// Convert to local chunk space for safe indexing
-		int localX = int(pos.x);
-		int localY = int(pos.y);
-		int localZ = int(pos.z);
+		int16_t localX = static_cast<int16_t>(pos.x);
+		int16_t localY = static_cast<int16_t>(pos.y);
+		int16_t localZ = static_cast<int16_t>(pos.z);
 
 		// Check neighboring faces using chunk-relative indexing
 		switch (f) {
@@ -218,20 +219,28 @@ void Chunk::generateBlockFaces(float*& vertexPtr, unsigned int*& indexPtr, unsig
 		// Skip adding the face if it is culled
 		if (cullFace) continue;
 
-		// Add 4 vertices for the current face
+	   // Determine the four vertices for the face.
+	   // The order: bottom-left, bottom-right, top-right, top-left.
+		PackedVertex faceVerts[4];
 		for (int i = 0; i < 4; i++) {
-			*vertexPtr++ = cubeVertices[faces[f][i]].x; // Position X
-			*vertexPtr++ = cubeVertices[faces[f][i]].y; // Position Y
-			*vertexPtr++ = cubeVertices[faces[f][i]].z; // Position Z
-			*vertexPtr++ = color.r;                     // Color R
-			*vertexPtr++ = color.g;                     // Color G
-			*vertexPtr++ = color.b;                     // Color B
-			*vertexPtr++ = texCoords[i][0];             // Texture U
-			*vertexPtr++ = texCoords[i][1];             // Texture V
-			*vertexPtr++ = normals[f].x;                // Normal X
-			*vertexPtr++ = normals[f].y;                // Normal Y
-			*vertexPtr++ = normals[f].z;                // Normal Z
-		} 
+			glm::vec3 vertexPos = cubeVertices[faces[f][i]];
+			// Pack position.
+			faceVerts[i].pos[0] = static_cast<int16_t>(vertexPos.x); 
+			faceVerts[i].pos[1] = static_cast<int16_t>(vertexPos.y); 
+			faceVerts[i].pos[2] = static_cast<int16_t>(vertexPos.z); 
+			// Pack colour.
+			faceVerts[i].colour = packColor(colour);
+			// Pack texture coordinates.
+			packTexCoord(texCoords[i], faceVerts[i].tex);
+			// Pack normal: use the precomputed normal for face f.
+			faceVerts[i].normal = packNormal(normals[f]);
+		}
+
+		// Write the 4 vertices into our output pointer.
+		for (int i = 0; i < 4; i++) {
+			*vertexPtr = faceVerts[i];
+			vertexPtr++;
+		}
 
 		// Write 6 indices (two triangles) for this face
 		*indexPtr++ = baseVertexIndex;     // Triangle 1
