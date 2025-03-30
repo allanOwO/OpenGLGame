@@ -54,8 +54,8 @@ void main()
     // Combine lighting with object color and texture
     vec3 result = (ambient + diffuse + specular) * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
 
-    //FragColor = vec4(result, objectColour.a * texture(ourTexture, TexCoord).a);
-    FragColor = texture(ourTexture, TexCoord);
+    FragColor = vec4(result, objectColour.a * texture(ourTexture, TexCoord).a);
+    //FragColor = texture(ourTexture, TexCoord);//no lighting
 
 }
 

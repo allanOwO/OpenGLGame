@@ -23,10 +23,10 @@ inline uint32_t packColor(const glm::vec3& colour) {
 
 inline void packTexCoord(const float tex[2], uint16_t outTex[2], BlockUV atlasUV) {
 
-    float u = atlasUV.UvBl.x + tex[0] * (atlasUV.UvTr.x - atlasUV.UvBl.x) * 65535.0f;//multiplying changes it to int
-    float v = atlasUV.UvBl.y + tex[1] * (atlasUV.UvTr.y - atlasUV.UvBl.y) * 65535.0f;
-    outTex[0] = static_cast<uint16_t>(u );
-    outTex[1] = static_cast<uint16_t>(v); 
+    float u = atlasUV.UvBl.x + tex[0] * (atlasUV.UvTr.x - atlasUV.UvBl.x);//multiplying changes it to int
+    float v = atlasUV.UvBl.y + tex[1] * (atlasUV.UvTr.y - atlasUV.UvBl.y);
+    outTex[0] = static_cast<uint16_t>(u * 65535.0f);
+    outTex[1] = static_cast<uint16_t>(v * 65535.0f);
 }
 
 inline int32_t packNormal(const glm::vec3& normal) {

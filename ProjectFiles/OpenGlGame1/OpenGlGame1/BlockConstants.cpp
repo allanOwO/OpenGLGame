@@ -66,7 +66,7 @@ const BlockUV getBlockUV(BlockType blockType, BlockFace face) {
 
     // Compute UVs based on atlas index
     float col = blockIndex % 4;
-    float row =3- blockIndex / 4;
+    float row = blockIndex / 4;
     float uvSize = 0.25f;
 
     return {
