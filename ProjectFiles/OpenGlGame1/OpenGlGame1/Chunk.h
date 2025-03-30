@@ -102,7 +102,7 @@ public:
 
 private:
 	
-	void generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos);
+	void generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos,const BlockType& type);
 	bool isBlockSolid(int x, int y, int z); 
 	void cacheNeighbors();
  

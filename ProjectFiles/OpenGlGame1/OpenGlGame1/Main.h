@@ -74,7 +74,7 @@ private:
 	unsigned int sunVBO, sunVAO, sunEBO;
 	Shader* shader;
 	Shader* sunShader;
-	std::map<BlockType, GLuint> textureMap;
+	GLuint texAtlas;
 
 	//chunk stuff
 	//map to track async tasks for each chunk by its position. 
@@ -90,7 +90,6 @@ private:
 
 	std::vector<glm::mat4> chunkModels;//array of chunk models
 	void updateChunks(const glm::vec3& playerPosition);
-	void generateChunk(const glm::vec3& pos);
 	void generateChunkAsync(const glm::vec3& pos);
 	void tryApplyChunkGeneration();
 	void drawChunks();

@@ -111,10 +111,10 @@ void Main::init() {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     //some opengl settings
-    //glEnable(GL_CULL_FACE);   // Enable face culling 
-    //glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
+    glEnable(GL_CULL_FACE);   // Enable face culling 
+    glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
-    //glEnable(GL_DEPTH_TEST); 
+    glEnable(GL_DEPTH_TEST); 
     glfwSwapInterval(0);// 1 = V-Sync on, 0 = V-Sync off 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
@@ -360,6 +360,8 @@ void Main::drawChunks() {
         if (!frustum.isBoxInFrustum(min, max)) {
             continue; // Skip chunks outside the frustum 
         }
+        if (!chunk.isActive)
+            continue;
 
         glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
         glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
@@ -372,7 +374,7 @@ void Main::drawChunks() {
             if (indices.empty()) continue;
 
             glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, textureMap.at(type));
+            glBindTexture(GL_TEXTURE_2D, texAtlas);
             glUniform1i(textureLocation, 0);
 
             glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
@@ -455,7 +457,7 @@ void Main::render() {
     glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection)); // Pass direction of sun
     //bind textures
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, textureMap[BlockType::DIRT]);
+    glBindTexture(GL_TEXTURE_2D, texAtlas);
     glUniform1i(textureLocation, 0); 
     //draw the rotating cube   
     glBindVertexArray(VAO);
@@ -628,51 +630,27 @@ void Main::getTextures() {
     int width, height, nrChannels;
 
     // Load another texture for a different block type, e.g., "stone.jpg"
-    unsigned char* data = stbi_load("../ResourceFiles/dirt.jpg", &width, &height, &nrChannels, 0);
+    unsigned char* data = stbi_load("../ResourceFiles/textureAtlas.png", &width, &height, &nrChannels, 0);
     if (!data) {
-        std::cerr << "Failed to load dirt texture!" << std::endl;
+        std::cerr << "Failed to load atlas" << std::endl;
         exit(-1);
     }
-    GLuint dirtTex;
-    glGenTextures(1, &dirtTex);
-    glBindTexture(GL_TEXTURE_2D, dirtTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+
+    // Determine texture format based on loaded image
+    GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+   
+    glGenTextures(1, &texAtlas);
+    glBindTexture(GL_TEXTURE_2D, texAtlas);
+    //wrap and fill params
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
     stbi_image_free(data);
 
-    // Store texture ID for "dirt" block
-    textureMap[BlockType::DIRT] = dirtTex;
-
-
-    data = stbi_load("../ResourceFiles/stone.jpg", &width, &height, &nrChannels, 0);
-    if (!data) {
-        std::cerr << "Failed to load stone texture!" << std::endl;
-        exit(-1);
-    }
-    GLuint stoneTex;
-    glGenTextures(1, &stoneTex);
-    glBindTexture(GL_TEXTURE_2D, stoneTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    stbi_image_free(data);
-
-    // Store texture ID for "dirt" block
-    textureMap[BlockType::STONE] = stoneTex;
-
-    data = stbi_load("../ResourceFiles/grass.jpg", &width, &height, &nrChannels, 0);
-    if (!data) {
-        std::cerr << "Failed to load grass texture!" << std::endl;
-        exit(-1);
-    }
-    GLuint grassTex;
-    glGenTextures(1, &grassTex);
-    glBindTexture(GL_TEXTURE_2D, grassTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    stbi_image_free(data);
-
-    // Store texture ID for "dirt" block
-    textureMap[BlockType::GRASS] = grassTex;
 }
 
 void Main::doFps() {

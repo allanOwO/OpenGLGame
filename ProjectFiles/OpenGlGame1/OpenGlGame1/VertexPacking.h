@@ -1,6 +1,8 @@
 #pragma once
 #define GLM_ENABLE_EXPERIMENTAL
 #include<glm/gtc/packing.hpp>
+#include "BlockConstants.h"
+#include <iostream>
 
 struct PackedVertex {
     int16_t pos[3];       // 3 floats for position (12 bytes)
@@ -19,10 +21,12 @@ inline uint32_t packColor(const glm::vec3& colour) {
     return (a << 24) | (b << 16) | (g << 8) | r;
 }
 
-inline void packTexCoord(const float tex[2], uint16_t outTex[2]) {
-    // Assuming tex coords in [0,1]. Scale to [0, 65535].
-    outTex[0] = static_cast<uint16_t>(glm::clamp(tex[0], 0.0f, 1.0f) * 65535.0f);
-    outTex[1] = static_cast<uint16_t>(glm::clamp(tex[1], 0.0f, 1.0f) * 65535.0f);
+inline void packTexCoord(const float tex[2], uint16_t outTex[2], BlockUV atlasUV) {
+
+    float u = atlasUV.UvBl.x + tex[0] * (atlasUV.UvTr.x - atlasUV.UvBl.x) * 65535.0f;//multiplying changes it to int
+    float v = atlasUV.UvBl.y + tex[1] * (atlasUV.UvTr.y - atlasUV.UvBl.y) * 65535.0f;
+    outTex[0] = static_cast<uint16_t>(u );
+    outTex[1] = static_cast<uint16_t>(v); 
 }
 
 inline int32_t packNormal(const glm::vec3& normal) {

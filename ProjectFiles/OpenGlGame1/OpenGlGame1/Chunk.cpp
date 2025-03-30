@@ -170,7 +170,7 @@ MeshData Chunk::generateMeshData() {
 					if (isSurrounded) continue;
 
 					// Generate faces for this block using pointers
-					generateBlockFaces(vertexPtr, indexPtr, baseVertexIndex, glm::ivec3(x, y, z));
+					generateBlockFaces(vertexPtr, indexPtr, baseVertexIndex, glm::ivec3(x, y, z), type);
 				}
 			}
 		}
@@ -179,12 +179,12 @@ MeshData Chunk::generateMeshData() {
 	return meshData;
 }
 
-void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos) {
+void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr, unsigned int& baseVertexIndex, const glm::ivec3 blockPos,const BlockType& type) {
 
-	//block position in chunk local space
+	//block position in chunk local space  
 	glm::vec3 pos = blockPos;
 	float size = 1.0f;
-	glm::vec3 colour(0.5f, 0.5f, 0.5f);//default colour
+	glm::vec3 colour(1.0f, 1.0f, 1.0f);//default colour
 	if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
 		colour = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
 	}
@@ -219,6 +219,9 @@ void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr
 		// Skip adding the face if it is culled
 		if (cullFace) continue;
 
+		BlockUV atlasUV = getBlockUV(type, faceEnum[f]);
+
+
 	   // Determine the four vertices for the face.
 	   // The order: bottom-left, bottom-right, top-right, top-left.
 		PackedVertex faceVerts[4];
@@ -231,7 +234,7 @@ void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr
 			// Pack colour.
 			faceVerts[i].colour = packColor(colour);
 			// Pack texture coordinates.
-			packTexCoord(texCoords[i], faceVerts[i].tex);
+			packTexCoord(texCoords[i], faceVerts[i].tex, atlasUV);
 			// Pack normal: use the precomputed normal for face f.
 			faceVerts[i].normal = packNormal(normals[f]);
 		}

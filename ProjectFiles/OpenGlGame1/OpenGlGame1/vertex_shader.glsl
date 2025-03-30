@@ -60,4 +60,5 @@ void main()
 
     //Unpack texture coordinates from the 16-bit range [0, 65535] to [0, 1].
     TexCoord = vec2(aTexCoord)/ 65535.0;
+    
 }
