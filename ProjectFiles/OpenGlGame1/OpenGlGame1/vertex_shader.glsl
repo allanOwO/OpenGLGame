@@ -13,7 +13,7 @@ out vec4 FragPosLightSpace;//output the shadwos
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 lightSpaceMatrix;
+uniform mat4 lightSpaceMatrix; 
 
 // Unpack the color from a 32-bit unsigned integer.
 vec4 unpackColor(uint packedColour)

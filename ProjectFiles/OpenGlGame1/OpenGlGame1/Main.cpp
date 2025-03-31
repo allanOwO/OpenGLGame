@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 16
+#define RENDER_DISTANCE 4
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.3f
 
@@ -124,26 +124,41 @@ void Main::init() {
 }
 
 void Main::createShadowMap() {
-    //gen fram buffer
-    glGenFramebuffers(1, &depthMapFBO);
-    //gen depth tex
-    glBindTexture(GL_TEXTURE_2D, depthMap);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
+    // Generate and configure depth texture
+    glGenTextures(1, &depthMap); 
+    glBindTexture(GL_TEXTURE_2D, depthMap); 
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER); 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f }; // Clamp to max depth outside frustum
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor); 
 
-    // Attach depth texture to framebuffer
+    // Generate and configure framebuffer
+    glGenFramebuffers(1, &depthMapFBO);
     glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-    glDrawBuffer(GL_NONE); // No color buffer needed
+    glDrawBuffer(GL_NONE); // No color buffer for shadow map
     glReadBuffer(GL_NONE);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
 
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "Shadow map framebuffer incomplete: " << status << std::endl;
+        switch (status) {
+        case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
+            std::cerr << "Incomplete attachment" << std::endl; break;
+        case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
+            std::cerr << "Missing attachment" << std::endl; break;
+        default:
+            std::cerr << "Other error" << std::endl; break;
+        }
+        exit(-1); // Or handle gracefully
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); 
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -208,6 +223,15 @@ void Main::createShaders() {
     lightSpaceLoc = glGetUniformLocation(depthShader->ID, "lightSpaceMatrix");
     shadowMapLoc = glGetUniformLocation(depthShader->ID, "shadowMap");
 
+    if (lightSpaceLoc == -1) {
+        std::cerr << "Uniform 'lightSpaceMatrix' not found in depth shader" << std::endl;
+    }
+
+    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+    if (currentProgram != depthShader->ID) {
+        std::cerr << "deoth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
+    }
+
 }
 
 void Main::createHighlight() {
@@ -271,11 +295,39 @@ void Main::createSun() {
 
 void Main::renderShadowMap() {
     // Render depth map
+    while (glGetError() != GL_NO_ERROR) {}
+
     glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+    GLenum err = glGetError(); 
+    if (err != GL_NO_ERROR) std::cerr << "Error after glViewport: " << err << std::endl;
+
     glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    err = glGetError();
+    if (err != GL_NO_ERROR) std::cerr << "Error after glBindFramebuffer: " << err << std::endl;
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "Framebuffer error: " << status << std::endl;
+        return;
+    }
+
+    glDepthMask(GL_TRUE); // Ensure depth writes are enabled
     glClear(GL_DEPTH_BUFFER_BIT);
+    err = glGetError();
+    if (err != GL_NO_ERROR) std::cerr << "Error after glClear: " << err << std::endl;
     depthShader->use();
+
+    GLint currentProgram;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+    if (currentProgram != depthShader->ID) {
+        std::cerr << "depth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
+    }
+
+    
+
     glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+     err = glGetError();
+    if (err != GL_NO_ERROR) std::cerr << "Error after unifrm light mat loc: " << err << std::endl;
 
     //render chunks 1st pass to create shadows
     std::lock_guard<std::recursive_mutex> lock(chunksMutex);
@@ -285,7 +337,11 @@ void Main::renderShadowMap() {
 
         glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.chunkPosition);
         glUniformMatrix4fv(glGetUniformLocation(depthShader->ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
+         err = glGetError();
+        if (err != GL_NO_ERROR) std::cerr << "Error after model loc: " << err << std::endl;
         glBindVertexArray(chunk.VAO);
+         err = glGetError();
+        if (err != GL_NO_ERROR) std::cerr << "Error after bind vao shadow: " << err << std::endl;
         for (const auto& typePair : chunk.indicesByType) {
             const auto& indices = typePair.second;
             if (indices.empty()) continue;
@@ -383,43 +439,49 @@ void Main::render() {
 
     // Rotate sun direction based on time
     float time = glfwGetTime();
-    float angle = time * SUN_SPEED; // Adjust speed (0.1f = slow rotation, increase for faster)
-
-    // Compute sun direction using a circular motion
-    glm::vec3 sunDir = glm::normalize(glm::vec3(
-        cos(angle),                      // Moves left/right (X)
-        sin(angle) * sin(SUN_TILT),      // Moves up/down (Y) with tilt
-        sin(angle) * cos(SUN_TILT)       // Moves forward/backward (Z)
-    ));
-
-    // Set the sun direction
+    float angle = time * SUN_SPEED;
+    glm::vec3 sunDir = glm::normalize(glm::vec3(cos(angle), sin(angle) * sin(SUN_TILT), sin(angle) * cos(SUN_TILT))); // Compute sun direction using a circular motion
     sunDirection = sunDir; 
 
     //shadow code
-    glm::mat4 lightProjection = glm::ortho(-20.0f, 20.0f, -20.0f, 20.0f, 1.0f, 50.0f);
+    glm::vec3 playerPos = player->getCameraPos();  
+    glm::mat4 lightProjection = glm::ortho(-100.0f + playerPos.x, 100.0f + playerPos.x,
+        -100.0f + playerPos.z, 100.0f + playerPos.z, 
+        1.0f, 200.0f);
 
-    glm::vec3 lightPos = -sunDirection * 20.0f; // Position sun far along its direction
+    glm::vec3 lightPos = playerPos - normalize (sunDirection) * 50.0f; // Position sun far along its direction
     glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
     lightSpaceMatrix = lightProjection * lightView;
-    //end
 
     renderShadowMap();
 
+    // Ensure default framebuffer and clear errors
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, width, height);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
     //use normal shader for cube + chunks
     shader->use(); 
+
     // pass view and projection matrices to shader
     glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
     glUniform3fv(camPosLoc, 1, glm::value_ptr(player->getCameraPos()));
     glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection));
-    glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+    //glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
     
+    
+
+    GLint shadowMapLoc = glGetUniformLocation(shader->ID, "shadowMap"); 
+    glUniform1i(shadowMapLoc, 1); 
+
+    GLint lightSpaceLoc = glGetUniformLocation(shader->ID, "lightSpaceMatrix");
+    glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix)); 
+
     // Bind shadow map to texture unit 1 (unit 0 is for texture atlas)
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
-    glUniform1i(shadowMapLoc, 1);
+    glActiveTexture(GL_TEXTURE1); 
+    glBindTexture(GL_TEXTURE_2D, depthMap); 
 
     // Bind texture atlas to unit 0
     glActiveTexture(GL_TEXTURE0);
@@ -462,6 +524,15 @@ void Main::generateChunkAsync(const glm::vec3& pos) {
 
 void Main::tryApplyChunkGeneration() {
     std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+    GLFWwindow* currentContext = glfwGetCurrentContext(); 
+    if (currentContext != window) {
+        std::cerr << "Context not current before chunk init! Current: " << currentContext << ", Expected: " << window << std::endl;
+        glfwMakeContextCurrent(window);
+    }
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Pending OpenGL error before chunk init: " << err << std::endl;
+    } 
     for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             
@@ -872,7 +943,7 @@ void Main::processChunkMeshingInOrder() {
 
 void Main::run() {
 
-    createCube();
+   
     createSun();
 
     getTextures();  

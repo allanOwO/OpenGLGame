@@ -81,13 +81,32 @@ void Chunk::initializeBuffers() {
 	}
 
 	glGenVertexArrays(1, &VAO);
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glGenVertexArrays: " << err << std::endl;
+
 	glGenBuffers(1, &VBO);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glGenBuffers (VBO): " << err << std::endl;
+
 	glGenBuffers(1, &EBO);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glGenBuffers (EBO): " << err << std::endl;
 
 	glBindVertexArray(VAO);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glBindVertexArray: " << err << std::endl;
+
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glBindBuffer (VBO): " << err << std::endl;
+
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after glBindBuffer (EBO): " << err << std::endl;
+
 	glBindVertexArray(0);
+	err = glGetError();
+	if (err != GL_NO_ERROR) std::cerr << "Error after unbinding VAO: " << err << std::endl; 
 
 	GLenum error = glGetError();
 	if (error != GL_NO_ERROR) {

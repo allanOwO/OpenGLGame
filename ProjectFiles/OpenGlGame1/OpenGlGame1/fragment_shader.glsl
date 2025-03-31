@@ -51,28 +51,38 @@ void main()
         specular = specularStrength * spec * sunColour; 
     
     // Calculate shadow
-    float shadow = ShadowCalculation(FragPosLightSpace);
+    float shadow = ShadowCalc(FragPosLightSpace);
     
     // Combine lighting with shadow
     vec3 lighting = (ambient + (1.0 - shadow) * (diffuse + specular));
 
     // Combine lighting with object color and texture
-    vec3 result = (ambient + diffuse + specular) * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
+    vec3 result = lighting * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
 
     FragColor = vec4(result, objectColour.a * texture(ourTexture, TexCoord).a);
     //FragColor = texture(ourTexture, TexCoord);//no lighting
 
 }
 
-float ShadowCalculation(vec4 fragPosLightSpace)
+float ShadowCalc(vec4 fragPosLightSpace)
 {
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w; // Perspective divide
     projCoords = projCoords * 0.5 + 0.5; // Transform to [0,1]
     if (projCoords.z > 1.0) return 0.0; // Outside far plane, no shadow
-    float closestDepth = texture(shadowMap, projCoords.xy).r;
-    float currentDepth = projCoords.z;
-    float bias = 0.005; // Reduce shadow acne
-    float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+
+    //smooth shadows
+    float shadow = 0.0;
+    float bias = 0.005;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += projCoords.z - bias > pcfDepth ? 1.0 : 0.0;
+        }
+    }
+    shadow /= 9.0; // Average over 3x3 grid
+
+
     return shadow;
 } 
 
