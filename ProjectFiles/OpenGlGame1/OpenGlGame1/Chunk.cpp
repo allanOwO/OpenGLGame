@@ -27,23 +27,12 @@ Chunk::Chunk(glm::ivec3 position,int seed, Main* m)
 			float worldX = chunkPosition.x + x;
 			float worldZ = chunkPosition.z + z;
 
-			glm::ivec2 noiseKey(worldX, worldZ);
-			float height;
-			
-			//if noise cached
-			if (main->noiseCache.find(noiseKey) != main->noiseCache.end()) {
-				height = main->noiseCache[noiseKey];
-			}
-			else//compute noise and cache
-			{
-				height = main->noiseGen.GetNoise(worldX, worldZ);
-				main->noiseCache[noiseKey] = height;
-			}
+			float height = main->getNoise(static_cast<float>(worldX), static_cast<float>(worldZ));//returns cached noise or gens new noise
 			
 			//height = main->noiseGen.GetNoise(worldX, worldZ);
 
-			int terrainHeight = baseTerrainHeight + static_cast<int>((height + 1.0f) * 0.5f * (maxTerrainHeight - 1));
-
+			//int terrainHeight = baseTerrainHeight + static_cast<int>((height + 1.0f) * 0.5f * (maxTerrainHeight - 1));
+			int terrainHeight = height;
 			for (int y = 0; y < chunkHeight; y++) {
 				BlockType type; 
 

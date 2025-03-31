@@ -24,29 +24,7 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
                 , isInitialLoading(true), currentLoadingRadius(0), maxLoadingRadius(RENDER_DISTANCE) {
 
     init();
-    player = std::make_unique<Player>(window,this);  // Use smart pointer for automatic cleanup;//give window to player
-
-
-
-    if (seed == -1) {
-        std::random_device rd;
-        seed = rd();
-        std::cout << seed;
-    }
-    //create noise for world gen
-    noiseGen.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
-    noiseGen.SetSeed(seed);
-
-    int range = CHUNK_SIZE * RENDER_DISTANCE;
-
-    for (int x = -range; x < range; x++) {
-        for (int z = -range; z < range; z++) {
-
-            noiseCache[{x, z}] = noiseGen.GetNoise(static_cast<float>(x), static_cast<float>(z));  // Fixed value 
-        }
-    }
-    
+    player = std::make_unique<Player>(window,this);  // Use smart pointer for automatic cleanup;//give window to player 
 }
 
 Main::~Main() {
@@ -121,6 +99,91 @@ void Main::init() {
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
     
+}
+
+void Main::initNoise() {
+
+    if (seed == -1) {
+        std::random_device rd;
+        seed = rd();
+        std::cout << seed;
+    }
+
+    //create noise for world gen
+    noiseGen.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
+    noiseGen.SetSeed(seed);
+
+    int range = CHUNK_SIZE * RENDER_DISTANCE;
+
+    for (int x = -range; x < range; x++) {
+        for (int z = -range; z < range; z++) {
+
+            noiseCache[{x, z}] = getNoise(static_cast<float>(x), static_cast<float>(z));  // Fixed value 
+        }
+    }
+}
+
+float Main::getNoise(float x, float z) {
+
+    glm::ivec2 noiseKey(x, z);
+
+    //if noise cached
+    if (noiseCache.find(noiseKey) != noiseCache.end()) {
+        return noiseCache[noiseKey];
+    }
+    else
+    {
+        noiseCache[noiseKey] = remapHeight(getWarpedHeight(x, z));
+        return(noiseCache[noiseKey]);
+    }
+
+}
+
+inline float Main::remapHeight(float noiseValue) {
+    // Input noiseValue is now 0 to 1
+    float flatness = 0.5f;  // Portion of terrain kept flat
+    float steepness = 2.0f; // Steepness of mountains
+    float remapped;
+
+   
+    remapped = flatness + (1.0f - flatness) * pow((noiseValue - flatness) / (1.0f - flatness), steepness);
+    
+
+    // Define world bounds
+    float minHeight = 32.0f; // Minimum terrain height (above baseTerrainHeight)
+    float maxHeight = 150.0f; // Maximum terrain height
+    return minHeight + (remapped* (maxHeight) ); // Scale to minHeight to maxHeight
+}
+
+inline float Main::getWarpedHeight(float x, float z) {
+
+    float warpScale = 0.2f;
+    float warpX = Main::noiseGen.GetNoise(x * warpScale + 10.0f, z * warpScale + 10.0f) * 10.0f;
+    float warpZ = Main::noiseGen.GetNoise(x * warpScale + 20.0f, z * warpScale + 20.0f) * 10.0f;
+    float warpedX = x + warpX;
+    float warpedZ = z + warpZ;
+
+    float height = 0.0f;
+    float amplitude = 0.5f;
+    float frequency = 0.3f;
+    float lacunarity = 2.0f;
+    float persistence = 0.5f;
+    int octaves = 3;
+    float totalAmplitude = 0.0f; // To normalize the range
+
+    for (int i = 0; i < octaves; i++) {
+        float sample = Main::noiseGen.GetNoise(warpedX * frequency, warpedZ * frequency); // -1 to 1
+        height += sample * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= persistence;
+        frequency *= lacunarity;
+    }
+
+    // Normalize to 0-1
+    height = (height + totalAmplitude) / (2.0f * totalAmplitude); // Shift from [-A, A] to [0, 2A], then to [0, 1]
+    return height;
+
 }
 
 void Main::createShadowMap() {
@@ -949,6 +1012,8 @@ void Main::run() {
     getTextures();  
     createShaders();
     createHighlight();
+
+    initNoise();
 
 
     player->spawn(glm::vec3(10,200,10));

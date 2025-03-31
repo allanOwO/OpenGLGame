@@ -45,6 +45,8 @@ public:
 
 	std::unordered_map<uint64_t, Chunk> chunks;
 
+	float getNoise(float x, float z);
+
 private:
 
 	void init(); // Initialize GLFW, GLAD, etc.
@@ -129,6 +131,11 @@ private:
 	glm::mat4 lightSpaceMatrix;
 	unsigned int lightSpaceLoc, shadowMapLoc;
 
+	//noise for world gen
+	void initNoise();
+	inline float remapHeight(float noiseValue);
+
+	inline float getWarpedHeight(float x, float z);
 };
 	
 
