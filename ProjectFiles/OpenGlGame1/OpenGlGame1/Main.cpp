@@ -441,7 +441,7 @@ void Main::render() {
     float time = glfwGetTime();
     float angle = time * SUN_SPEED;
     glm::vec3 sunDir = glm::normalize(glm::vec3(cos(angle), sin(angle) * sin(SUN_TILT), sin(angle) * cos(SUN_TILT))); // Compute sun direction using a circular motion
-    sunDirection = sunDir; 
+    sunDirection = -sunDir; 
 
     //shadow code
     glm::vec3 playerPos = player->getCameraPos();  
