@@ -37,9 +37,10 @@ void main()
     vec3 lightDir = normalize(-sunDirection);
     
     //smoothly disables light when crossing horizon
-    float lightFactor = smoothstep(0.0,0.1,lightDir.y);
+    float lightFactor = smoothstep(-0.1,0.1,lightDir.y);
         
         float diff = max(dot(norm, lightDir),0.0f) * lightFactor;
+        //float diff = 1.0f;
         diffuse = diff * sunColour;
 
         // Specular lighting

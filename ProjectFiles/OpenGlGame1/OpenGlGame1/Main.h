@@ -124,8 +124,8 @@ private:
 	unsigned int depthMapFBO;
 	unsigned int depthMap;
 	Shader* depthShader;
-	static const int SHADOW_WIDTH = 4096;
-	static const int SHADOW_HEIGHT = 4096;
+	static const int SHADOW_WIDTH = 4096*2;
+	static const int SHADOW_HEIGHT = 4096*2;
 	glm::mat4 lightSpaceMatrix;
 	unsigned int lightSpaceLoc, shadowMapLoc;
 

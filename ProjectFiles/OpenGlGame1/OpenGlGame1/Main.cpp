@@ -443,7 +443,7 @@ void Main::render() {
     glm::vec3 sunDir = glm::normalize(glm::vec3(cos(angle), sin(angle) * sin(SUN_TILT), sin(angle) * cos(SUN_TILT))); // Compute sun direction using a circular motion
     sunDirection = -sunDir; 
 
-    //shadow code
+    //shadow code, smaller area gives better shadows with same resolution
     glm::vec3 playerPos = player->getCameraPos();  
     glm::mat4 lightProjection = glm::ortho(-100.0f + playerPos.x, 100.0f + playerPos.x,
         -100.0f + playerPos.z, 100.0f + playerPos.z, 
