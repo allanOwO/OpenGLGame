@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 0
+#define RENDER_DISTANCE 16
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.3f
 
@@ -53,6 +53,7 @@ Main::~Main() {
     player.reset();
     glfwDestroyWindow(window);
     glfwTerminate();
+    delete depthShader;
 }
 
 std::string Main::loadShader(const char* filepath) {
@@ -109,6 +110,7 @@ void Main::init() {
 
     // Set framebuffer size callback  
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    createShadowMap();
 
     //some opengl settings
     glEnable(GL_CULL_FACE);   // Enable face culling 
@@ -119,6 +121,29 @@ void Main::init() {
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
     
+}
+
+void Main::createShadowMap() {
+    //gen fram buffer
+    glGenFramebuffers(1, &depthMapFBO);
+    //gen depth tex
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f }; // Clamp to max depth outside frustum
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    // Attach depth texture to framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+    glDrawBuffer(GL_NONE); // No color buffer needed
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 }
 
 void Main::processInput(GLFWwindow* window)
@@ -145,11 +170,10 @@ void Main::processInput(GLFWwindow* window)
     }
 }
 
-
-
 void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
     sunShader = new Shader("sunVertex.glsl","sunFragment.glsl");
+    depthShader = new Shader("depth_vertex.glsl", "depth_fragment.glsl");
 
     if (sunShader->ID == 0) {
         std::cerr << "Sun shader failed to compile/link" << std::endl;
@@ -180,109 +204,9 @@ void Main::createShaders() {
     sunColourLoc = glGetUniformLocation(sunShader->ID, "sunColour");
     sunCamPosLoc = glGetUniformLocation(sunShader->ID, "camPos");
 
-}
-
-void Main::createCube() {
-
-    float vertices[] = {
-        // positions          // colours           // texture coords
-        // Back face
-        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
-        // Front face
-        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
-        // Left face
-        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-        // Right face
-         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,
-         // Bottom face
-         -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-          0.5f, -0.5f, -0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
-          0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
-          0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
-         -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f,
-         -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-         // Top face
-         -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-          0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-          0.5f,  0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 1.0f,
-          0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,
-         -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
-         -0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f
-    };
-
-    float normals[] = {
-        // Back face (0, 0, -1)
-        0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,
-        0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,  0.0f, 0.0f, -1.0f,
-        // Front face (0, 0, 1)
-        0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f,
-        // Left face (-1, 0, 0)
-        -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
-        -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
-        // Right face (1, 0, 0)
-        1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
-        1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
-        // Bottom face (0, -1, 0)
-        0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,
-        0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  0.0f, -1.0f, 0.0f,
-        // Top face (0, 1, 0)
-        0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,
-        0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f,   0.0f, 1.0f, 0.0f
-    };
-
-    //create vertex array object
-    glGenVertexArrays(1, &VAO);
-    glBindVertexArray(VAO);//bind VAO
-
-
-    //create vertex buffer object
-    glGenBuffers(1, &VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);//basically make GL_ARRAY_BUFFER work as a reference to vbo
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);//copy data (vertices) into the buffers memory
-
-    // Set the position attribute (first 3 floats in each vertex)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0); 
-    glEnableVertexAttribArray(0); 
-
-    // Set the colour attribute (next 3 floats in each vertex)
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); 
-    glEnableVertexAttribArray(1); 
-
-    //set textue position
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); 
-    glEnableVertexAttribArray(2); 
-
-    //bind normals to cube
-    glGenBuffers(1, &normalsVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, normalsVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(normals), normals, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0); // Normal 
-    glEnableVertexAttribArray(3); 
-
-    //unblund vao
-    glBindVertexArray(0);
+    depthShader->use();
+    lightSpaceLoc = glGetUniformLocation(depthShader->ID, "lightSpaceMatrix");
+    shadowMapLoc = glGetUniformLocation(depthShader->ID, "shadowMap");
 
 }
 
@@ -343,6 +267,38 @@ void Main::createSun() {
     glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
+}
+
+void Main::renderShadowMap() {
+    // Render depth map
+    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    depthShader->use();
+    glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+
+    //render chunks 1st pass to create shadows
+    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
+    for (const auto& pair : chunks) {
+        const Chunk& chunk = pair.second;
+        if (!chunk.isActive) continue;
+
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.chunkPosition);
+        glUniformMatrix4fv(glGetUniformLocation(depthShader->ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
+        glBindVertexArray(chunk.VAO);
+        for (const auto& typePair : chunk.indicesByType) {
+            const auto& indices = typePair.second;
+            if (indices.empty()) continue;
+            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
+                (void*)(chunk.baseIndicesByType.at(typePair.first) * sizeof(unsigned int)));
+        }
+        glBindVertexArray(0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    //clear screen for main pass
+    glViewport(0, 0, width, height);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void Main::drawChunks() { 
@@ -439,30 +395,36 @@ void Main::render() {
     // Set the sun direction
     sunDirection = sunDir; 
 
+    //shadow code
+    glm::mat4 lightProjection = glm::ortho(-20.0f, 20.0f, -20.0f, 20.0f, 1.0f, 50.0f);
+
+    glm::vec3 lightPos = -sunDirection * 20.0f; // Position sun far along its direction
+    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
+    lightSpaceMatrix = lightProjection * lightView;
+    //end
+
+    renderShadowMap();
+
+
+
     //use normal shader for cube + chunks
     shader->use(); 
     // pass view and projection matrices to shader
     glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
     glUniform3fv(camPosLoc, 1, glm::value_ptr(player->getCameraPos()));
+    glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection));
+    glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
     
-    //model matrice for rotating cube
-    glm::mat4 cubeModel = glm::mat4(1.0f);
-    cubeModel = glm::rotate(cubeModel, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+    // Bind shadow map to texture unit 1 (unit 0 is for texture atlas)
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glUniform1i(shadowMapLoc, 1);
 
-    
-    glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(cubeModel)); 
-    glUniform4f(lightColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);//whiteLgiht
-    
-    glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection)); // Pass direction of sun
-    //bind textures
+    // Bind texture atlas to unit 0
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texAtlas);
     glUniform1i(textureLocation, 0); 
-    //draw the rotating cube   
-    glBindVertexArray(VAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-    glBindVertexArray(0);
 
     drawChunks();
 

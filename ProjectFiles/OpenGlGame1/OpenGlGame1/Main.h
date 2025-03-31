@@ -118,7 +118,16 @@ private:
 	void createHighlight();
 	GLuint highlightVAO, highlightVBO;
 
-	
+	//shadow stuff
+	void createShadowMap();
+	void renderShadowMap();
+	unsigned int depthMapFBO;
+	unsigned int depthMap;
+	Shader* depthShader;
+	static const int SHADOW_WIDTH = 1024;
+	static const int SHADOW_HEIGHT = 1024;
+	glm::mat4 lightSpaceMatrix;
+	unsigned int lightSpaceLoc, shadowMapLoc;
 
 };
 	

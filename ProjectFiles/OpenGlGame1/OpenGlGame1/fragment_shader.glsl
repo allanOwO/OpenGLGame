@@ -5,14 +5,17 @@ in vec4 objectColour;
 in vec2 TexCoord;
 in vec3 FragPos;
 in vec3 Normal;
+in vec4 FragPosLightSpace;
 
 uniform vec4 lightColour;
 uniform vec3 lightPos;// Light position in world space
 uniform vec3 sunDirection;
 uniform sampler2D ourTexture;
+uniform sampler2D shadowMap;
 uniform vec3 cameraPos;
 
 vec3 sunsetColour();
+float ShadowCalc(vec4 FragPosLightSpace);
 
 void main()
 {
@@ -22,8 +25,7 @@ void main()
 
     
     //ambient occlusion, darkens side faces, keeps tops light
-    float ao = clamp((Normal.y + 1.0) * 0.5, 0.0, 1.0);  // Range 0..1
-    
+    float ao = clamp((Normal.y + 1.0) * 0.5, 0.0, 1.0);  // Range 0..1    
     float aoFactor = mix(0.5, 1.0, ao);
 
     //ambient
@@ -48,8 +50,11 @@ void main()
         float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess) * lightFactor;
         specular = specularStrength * spec * sunColour; 
     
-
+    // Calculate shadow
+    float shadow = ShadowCalculation(FragPosLightSpace);
     
+    // Combine lighting with shadow
+    vec3 lighting = (ambient + (1.0 - shadow) * (diffuse + specular));
 
     // Combine lighting with object color and texture
     vec3 result = (ambient + diffuse + specular) * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
@@ -58,6 +63,18 @@ void main()
     //FragColor = texture(ourTexture, TexCoord);//no lighting
 
 }
+
+float ShadowCalculation(vec4 fragPosLightSpace)
+{
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w; // Perspective divide
+    projCoords = projCoords * 0.5 + 0.5; // Transform to [0,1]
+    if (projCoords.z > 1.0) return 0.0; // Outside far plane, no shadow
+    float closestDepth = texture(shadowMap, projCoords.xy).r;
+    float currentDepth = projCoords.z;
+    float bias = 0.005; // Reduce shadow acne
+    float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    return shadow;
+} 
 
 vec3 sunsetColour(){
 

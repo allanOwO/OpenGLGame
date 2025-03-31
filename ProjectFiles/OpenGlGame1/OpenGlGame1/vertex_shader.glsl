@@ -8,20 +8,21 @@ out vec4 objectColour;//colour to go to frag shader, must be same name
 out vec2 TexCoord;
 out vec3 FragPos;//world space pos
 out vec3 Normal;//normal vector
+out vec4 FragPosLightSpace;//output the shadwos
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform vec3 cameraPos;
+uniform mat4 lightSpaceMatrix;
 
 // Unpack the color from a 32-bit unsigned integer.
-vec4 unpackColor(uint packed)
+vec4 unpackColor(uint packedColour)
 {
     // Assuming the format is: lowest 8 bits = r, next = g, next = b, highest 8 bits = a.
-    float r = float((packed >> 0)  & 0xFFu) / 255.0;
-    float g = float((packed >> 8)  & 0xFFu) / 255.0;
-    float b = float((packed >> 16) & 0xFFu) / 255.0;
-    float a = float((packed >> 24) & 0xFFu) / 255.0;
+    float r = float((packedColour >> 0)  & 0xFFu) / 255.0;
+    float g = float((packedColour >> 8)  & 0xFFu) / 255.0;
+    float b = float((packedColour >> 16) & 0xFFu) / 255.0;
+    float a = float((packedColour >> 24) & 0xFFu) / 255.0;
     return vec4(r, g, b, a);
 }
 
@@ -60,5 +61,5 @@ void main()
 
     //Unpack texture coordinates from the 16-bit range [0, 65535] to [0, 1].
     TexCoord = vec2(aTexCoord)/ 65535.0;
-    
+    FragPosLightSpace = lightSpaceMatrix * vec4(FragPos,1.0);
 }
