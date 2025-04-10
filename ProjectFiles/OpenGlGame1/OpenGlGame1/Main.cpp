@@ -12,9 +12,9 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 4
+#define RENDER_DISTANCE 16
 #define SUN_TILT glm::radians(70.0f)
-#define SUN_SPEED 0.3f
+#define SUN_SPEED 0.1f
 
 FastNoiseLite Main::noiseGen;
 std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
@@ -125,55 +125,100 @@ void Main::initNoise() {
 }
 
 float Main::getNoise(float x, float z) {
-
     glm::ivec2 noiseKey(x, z);
 
-    //if noise cached
     if (noiseCache.find(noiseKey) != noiseCache.end()) {
         return noiseCache[noiseKey];
     }
-    else
-    {
-        noiseCache[noiseKey] = remapHeight(getWarpedHeight(x, z));
-        return(noiseCache[noiseKey]);
+    else {
+        float biomeValue = getBiomeNoise(x, z); // Low-frequency noise for biome selection
+        float height = remapHeight(getWarpedHeight(x, z,biomeValue), biomeValue);
+        noiseCache[noiseKey] = height;
+        return height;
+    }
+}
+
+// New function: Low-frequency noise to determine biome type
+inline float Main::getBiomeNoise(float x, float z) {
+    float biomeScale = 0.002f; // Very low frequency for large biome areas
+    float biomeNoise = Main::noiseGen.GetNoise(x * biomeScale, z * biomeScale);
+    //return 1;
+    return (biomeNoise + 1.0f) / 2.0f; // Normalize to 0-1
+    
+}
+
+//takes 0 to 1 noise value and assigns height in y
+inline float Main::remapHeight(float noiseValue, float biomeValue) {
+    float minHeight = 32.0f;  // Base height
+    float maxHeight = 150.0f; // Max height (can increase for taller mountains)
+
+    // Define height functions for each biome
+    auto plainsHeight = [](float nv) {
+        float flatness = 0.8f; // Keep plains flattish
+        return flatness * nv;
+        };
+
+    auto hillsHeight = [](float nv) {
+        float flatness = 0.5f;
+        float steepness = 2.0f;
+        return flatness + (1.0f - flatness) * pow((nv - flatness) / (1.0f - flatness), steepness);
+        };
+
+    auto mountainsHeight = [](float nv) {
+        float flatness = 0.3f; // Less flat area for mountains
+        float steepness = 3.0f; // Steeper slopes
+        return flatness + (1.0f - flatness) * pow((nv - flatness) / (1.0f - flatness), steepness);
+        };
+
+    // Interpolate between biomes based on biomeValue
+    float height;
+    if (biomeValue < 0.3f) {
+        height = plainsHeight(noiseValue); // Pure plains
+    }
+    else if (biomeValue < 0.6f) {
+        // Blend plains and hills
+        float t = (biomeValue - 0.3f) / 0.4f; // Transition factor (0 to 1)
+        height = (1.0f - t) * plainsHeight(noiseValue) + t * hillsHeight(noiseValue);
+    }
+    else {
+        // Blend hills and mountains
+        float t = (biomeValue - 0.7f) / 0.3f; // Transition factor (0 to 1)
+        height = (1.0f - t) * hillsHeight(noiseValue) + t * mountainsHeight(noiseValue);
     }
 
+    // Scale height based on biome
+    float scale;
+    if (biomeValue < 0.3f) {
+        scale = 0.2f; // Low height for plains
+    }
+    else if (biomeValue < 0.6f) {
+        scale = 0.8f; // Moderate height for hills
+    }
+    else {
+        scale = 2.0f; // Full height for mountains
+    }
+
+    return minHeight + height * (maxHeight * scale);
 }
 
-inline float Main::remapHeight(float noiseValue) {
-    // Input noiseValue is now 0 to 1
-    float flatness = 0.5f;  // Portion of terrain kept flat
-    float steepness = 2.0f; // Steepness of mountains
-    float remapped;
-
-   
-    remapped = flatness + (1.0f - flatness) * pow((noiseValue - flatness) / (1.0f - flatness), steepness);
-    
-
-    // Define world bounds
-    float minHeight = 32.0f; // Minimum terrain height (above baseTerrainHeight)
-    float maxHeight = 150.0f; // Maximum terrain height
-    return minHeight + (remapped* (maxHeight) ); // Scale to minHeight to maxHeight
-}
-
-inline float Main::getWarpedHeight(float x, float z) {
-
+// Updated getWarpedHeight for more variation
+inline float Main::getWarpedHeight(float x, float z, float biomeValue) {
     float warpScale = 0.2f;
-    float warpX = Main::noiseGen.GetNoise(x * warpScale + 10.0f, z * warpScale + 10.0f) * 10.0f;
-    float warpZ = Main::noiseGen.GetNoise(x * warpScale + 20.0f, z * warpScale + 20.0f) * 10.0f;
+    float warpX = Main::noiseGen.GetNoise(x * warpScale + 10.0f, z * warpScale + 10.0f) * 15.0f; // Increased warp
+    float warpZ = Main::noiseGen.GetNoise(x * warpScale + 20.0f, z * warpScale + 20.0f) * 15.0f;
     float warpedX = x + warpX;
     float warpedZ = z + warpZ;
 
     float height = 0.0f;
-    float amplitude = 0.5f;
-    float frequency = 0.3f;
+    float amplitude = 0.9f; // Increased base amplitude for more variation
+    float frequency = (biomeValue > 0.7f) ? 0.08f : 0.3f; // Lower frequency for mountains
     float lacunarity = 2.0f;
-    float persistence = 0.5f;
-    int octaves = 3;
-    float totalAmplitude = 0.0f; // To normalize the range
+    float persistence = (biomeValue >= 0.7f) ? 0.7f : 0.6f; // Higher persistence for more detail 
+    int octaves = (biomeValue > 0.7f) ? 5 : 4; //jaggedness
+    float totalAmplitude = 0.0f;
 
     for (int i = 0; i < octaves; i++) {
-        float sample = Main::noiseGen.GetNoise(warpedX * frequency, warpedZ * frequency); // -1 to 1
+        float sample = Main::noiseGen.GetNoise(warpedX * frequency, warpedZ * frequency);
         height += sample * amplitude;
         totalAmplitude += amplitude;
         amplitude *= persistence;
@@ -181,9 +226,14 @@ inline float Main::getWarpedHeight(float x, float z) {
     }
 
     // Normalize to 0-1
-    height = (height + totalAmplitude) / (2.0f * totalAmplitude); // Shift from [-A, A] to [0, 2A], then to [0, 1]
-    return height;
+    height = (height + totalAmplitude) / (2.0f * totalAmplitude);
 
+    // Amplify peaks in mountain regions
+    if (biomeValue >= 0.7f) {
+        height = pow(height, 0.6f); // Exaggerates peaks; adjust exponent as needed
+    }
+
+    return height;
 }
 
 void Main::createShadowMap() {
@@ -759,8 +809,15 @@ void Main::doFps() {
         frameCount = 0;
         lastFPSTime = currentTime;
 
+        glm::ivec3 position = player->getCameraPos(); 
+
         // Update window title with FPS
-        std::string title = "My Game - FPS: " + std::to_string(fps);
+        std::string title = "My Game - FPS: " + std::to_string(fps)
+            + " Position: "
+            + "X:" + std::to_string(position.x)
+            + " Y:"+ std::to_string(position.y)
+            + " Z:"+ std::to_string(position.z);
+
         glfwSetWindowTitle(window, title.c_str());
     }
 }

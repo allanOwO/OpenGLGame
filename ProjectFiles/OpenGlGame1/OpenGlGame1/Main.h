@@ -21,6 +21,7 @@
 #include <glm/vec2.hpp>
 #include "Frustum.h"
 
+
 class Main
 {
 public:
@@ -51,7 +52,6 @@ private:
 
 	void init(); // Initialize GLFW, GLAD, etc.
 	void createShaders();
-	void createCube();
 	void createSun();
 	void renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection); 
 	void render();
@@ -133,9 +133,10 @@ private:
 
 	//noise for world gen
 	void initNoise();
-	inline float remapHeight(float noiseValue);
+	inline float getBiomeNoise(float x, float z);
+	inline float remapHeight(float noiseValue, float biomeValue);
 
-	inline float getWarpedHeight(float x, float z);
+	inline float getWarpedHeight(float x, float z,float biomeValue);
 };
 	
 

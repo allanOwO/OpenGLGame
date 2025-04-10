@@ -81,7 +81,7 @@ float ShadowCalc(vec4 fragPosLightSpace)
             shadow += projCoords.z - bias > pcfDepth ? 1.0 : 0.0;
         }
     }
-    shadow /= 9.0; // Average over 3x3 grid
+    shadow /= 12.0; // Average over 3x3 grid
 
 
     return shadow;
