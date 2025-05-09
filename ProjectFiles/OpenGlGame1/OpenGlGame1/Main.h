@@ -21,6 +21,9 @@
 #include <glm/vec2.hpp>
 #include "Frustum.h"
 
+#include "Mob.h"
+#include "Bee.h"
+
 
 class Main
 {
@@ -60,7 +63,12 @@ private:
 	void processInput(GLFWwindow* window);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc, camPosLoc;
+	unsigned int 
+		modelLocation, viewLocation, projectionLocation, textureLocation,
+		lightColourLoc, lightPosLoc,
+		sunDirLoc, camPosLoc,
+		entityModelLoc,entityViewLoc,entityProjLoc;
+
 	unsigned int sunViewLoc, sunProjLoc ,sunColourLoc, sunSunDirLoc, sunCamPosLoc;
 	glm::vec3 mainLightPos = glm::vec3(0, 20, 10);
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
@@ -76,6 +84,7 @@ private:
 	unsigned int sunVBO, sunVAO, sunEBO;
 	Shader* shader;
 	Shader* sunShader;
+	Shader* entityShader;
 	GLuint texAtlas;
 
 	//chunk stuff
@@ -104,18 +113,18 @@ private:
 	//fps tracking & timing
 	float lastFPSTime = 0.0f; // Time of the last FPS update
 	int frameCount = 0;        // Number of frames since last update
-	float fps = 0.0f;          // Current FPS value
-	float deltaTime = 0.0f;	// Time between current frame and last frame
-	float lastFrame = 0.0f; // Time of last frame
+	float fps = 0.0f;         
+	float deltaTime = 0.0f;
+	float lastFrame = 0.0f; //Time of last frame
 
 
 	//building
-	void raycastBlock(); // Find block player is looking at
-	void placeBlock(); // Place a block
-	void breakBlock(); // Break a block
-	float reachDistance = 5.0f; // Max distance player can build
-	glm::vec3 highlightedBlockPos; // Position of the block to highlight
-	bool hasHighlightedBlock;      // True if a block is in range and highlighted
+	void raycastBlock(); //block player is looking at
+	void placeBlock(); 
+	void breakBlock(); 
+	float reachDistance = 5.0f;
+	glm::vec3 highlightedBlockPos;
+	bool hasHighlightedBlock;      //true if a block is in range and highlighted
 	glm::vec3 prevBlock;
 	void createHighlight();
 	GLuint highlightVAO, highlightVBO;
@@ -137,6 +146,9 @@ private:
 	inline float remapHeight(float noiseValue, float biomeValue);
 
 	inline float getWarpedHeight(float x, float z,float biomeValue);
+
+	//list of mobs
+	std::vector<std::unique_ptr<Mob>> entities;
 };
 	
 

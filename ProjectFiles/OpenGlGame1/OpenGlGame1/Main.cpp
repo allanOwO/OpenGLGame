@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 16
+#define RENDER_DISTANCE 0
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.1f
 
@@ -96,7 +96,7 @@ void Main::init() {
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
     glfwSwapInterval(0);// 1 = V-Sync on, 0 = V-Sync off 
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
     
 }
@@ -302,12 +302,20 @@ void Main::createShaders() {
     shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
     sunShader = new Shader("sunVertex.glsl","sunFragment.glsl");
     depthShader = new Shader("depth_vertex.glsl", "depth_fragment.glsl");
+    entityShader = new Shader("entity_vertex.glsl", "entity_fragment.glsl");
+
+    if (entityShader->ID == 0) {
+        std::cerr << "Entity shader failed to compile/link" << std::endl;
+        exit(-1);
+    }
+    
 
     if (sunShader->ID == 0) {
         std::cerr << "Sun shader failed to compile/link" << std::endl;
     }
     std::cout << "Sun shader ID: " << sunShader->ID << std::endl; // Verify ID 
 
+    //chunk shader
     shader->use();  
     modelLocation = glGetUniformLocation(shader->ID, "model");
     viewLocation = glGetUniformLocation(shader->ID, "view");
@@ -318,6 +326,7 @@ void Main::createShaders() {
     sunDirLoc = glGetUniformLocation(shader->ID, "sunDirection");
     camPosLoc = glGetUniformLocation(shader->ID, "cameraPos");
 
+    //sun shader
     sunShader->use();
 
     GLint currentProgram;
@@ -332,6 +341,22 @@ void Main::createShaders() {
     sunColourLoc = glGetUniformLocation(sunShader->ID, "sunColour");
     sunCamPosLoc = glGetUniformLocation(sunShader->ID, "camPos");
 
+    
+    //entity shader
+    entityShader->use();
+    entityModelLoc = glGetUniformLocation(entityShader->ID, "model");
+    entityViewLoc = glGetUniformLocation(entityShader->ID, "view");
+    entityProjLoc = glGetUniformLocation(entityShader->ID, "projection");
+
+    GLint textureLoc = glGetUniformLocation(entityShader->ID, "texture0");
+    if (textureLoc == -1) {
+        std::cerr << "Texture uniform 'texture0' not found in entity shader" << std::endl;
+    } 
+    if (entityModelLoc == -1 || entityViewLoc == -1 || entityProjLoc == -1) {
+        std::cerr << "Missing model/view/projection uniforms in entity shader" << std::endl;
+    }
+
+    //shadow shader
     depthShader->use();
     lightSpaceLoc = glGetUniformLocation(depthShader->ID, "lightSpaceMatrix");
     shadowMapLoc = glGetUniformLocation(depthShader->ID, "shadowMap");
@@ -342,7 +367,7 @@ void Main::createShaders() {
 
     glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
     if (currentProgram != depthShader->ID) {
-        std::cerr << "deoth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
+        std::cerr << "depth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
     }
 
 }
@@ -420,7 +445,7 @@ void Main::renderShadowMap() {
 
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        std::cerr << "Framebuffer error: " << status << std::endl;
+        std::cerr << "Framebuffer error: " << status << std::endl; 
         return;
     }
 
@@ -468,6 +493,7 @@ void Main::renderShadowMap() {
     //clear screen for main pass
     glViewport(0, 0, width, height);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void Main::drawChunks() { 
@@ -507,6 +533,7 @@ void Main::drawChunks() {
         }
         glBindVertexArray(0);
     }
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection) {
@@ -534,6 +561,7 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
     glBindVertexArray(0); 
     glEnable(GL_DEPTH_TEST); 
     glDisable(GL_BLEND);  
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void Main::render() {
@@ -603,6 +631,8 @@ void Main::render() {
 
     drawChunks();
 
+    
+
     raycastBlock();//used to find currently faced blocl
     // Render highlight if a block is in range
     if (hasHighlightedBlock) {
@@ -618,7 +648,22 @@ void Main::render() {
         glBindVertexArray(0);
     }
 
+    entityShader->use();
+    glUniformMatrix4fv(entityViewLoc, 1, GL_FALSE, glm::value_ptr(view)); 
+    glUniformMatrix4fv(entityProjLoc, 1, GL_FALSE, glm::value_ptr(projection)); 
+    for (auto& entity : entities) {
+        std::cout << "Rendering entity at position: " << glm::to_string(entity->position) << std::endl; 
+        entity->render(entityShader->ID); 
+        GLenum err;
+        while ((err = glGetError()) != GL_NO_ERROR) {
+            std::cerr << "OpenGL error after rendering entity: " << err << std::endl;
+        }
+        
+    }
+
+
     renderSun(view,projection,-sunDirection); 
+
 }
 
 void Main::generateChunkAsync(const glm::vec3& pos) {
@@ -637,11 +682,9 @@ void Main::generateChunkAsync(const glm::vec3& pos) {
 
 void Main::tryApplyChunkGeneration() {
     std::lock_guard<std::recursive_mutex> lock(chunksMutex);
-    GLFWwindow* currentContext = glfwGetCurrentContext(); 
-    if (currentContext != window) {
-        std::cerr << "Context not current before chunk init! Current: " << currentContext << ", Expected: " << window << std::endl;
-        glfwMakeContextCurrent(window);
-    }
+    
+    glfwMakeContextCurrent(window);
+    
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         std::cerr << "Pending OpenGL error before chunk init: " << err << std::endl;
@@ -1024,7 +1067,7 @@ void Main::processChunkMeshingInOrder() {
     glm::ivec3 playerChunkPos = glm::ivec3(
         floor(player->getCameraPos().x / CHUNK_SIZE),
         0, // Y is fixed at 0 for chunk coordinates
-        floor(player->getCameraPos().x / CHUNK_SIZE)
+        floor(player->getCameraPos().z / CHUNK_SIZE)
     );
 
     //pos in world space,locked to chunk ( 0,0,16)
@@ -1063,6 +1106,11 @@ void Main::processChunkMeshingInOrder() {
 
 void Main::run() {
 
+    glfwMakeContextCurrent(window);
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "OpenGL error at start of run: 0x" << std::hex << err << std::dec << std::endl;
+    } 
    
     createSun();
 
@@ -1072,8 +1120,16 @@ void Main::run() {
 
     initNoise();
 
+    // Verify context is still current
+    if (!glfwGetCurrentContext()) {
+        std::cerr << "OpenGL context lost before entity creation!" << std::endl;
+        exit(-1);
+    }
+
 
     player->spawn(glm::vec3(10,200,10));
+    entities.push_back(std::make_unique<Bee>(glm::vec3(0, 35, 0)));
+
     lastFrame = glfwGetTime();
 
     // Main loop
@@ -1095,6 +1151,11 @@ void Main::run() {
         processInput(window); 
 
         processChunkMeshingInOrder();
+
+        for (auto& entity : entities) {
+            entity->update(deltaTime);
+
+        }
 
         render();
         doFps();
