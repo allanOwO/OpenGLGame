@@ -9,7 +9,7 @@
 
 #define GRAVITY -21.0f//as a downwards force
 #define JUMP_HEIGHT 1.2f
-#define SPRINT_SPEED 1.3f
+#define SPRINT_SPEED 1.4f
 #define BASE_SPEED 8.0f
 
 //players bounding box(collsisions)
