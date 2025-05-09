@@ -12,7 +12,7 @@
 #include <unordered_set>
 
 #define CHUNK_SIZE 16
-#define RENDER_DISTANCE 0
+#define RENDER_DISTANCE 12
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.1f
 
@@ -95,8 +95,8 @@ void Main::init() {
     glCullFace(GL_BACK);      // Cull back faces (only render front faces) 
     glFrontFace(GL_CCW);      // Define front faces as counterclockwise (CCW) 
     glEnable(GL_DEPTH_TEST); 
-    glfwSwapInterval(0);// 1 = V-Sync on, 0 = V-Sync off 
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
+    glfwSwapInterval(1);// 1 = V-Sync on, 0 = V-Sync off 
+    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode 
 
     
 }
@@ -564,6 +564,52 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void Main::drawMobs(glm::mat4& view, glm::mat4& projection) {
+
+
+    entityShader->use();
+
+    glUniformMatrix4fv(entityViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(entityProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+
+    glm::mat4 beeTransform = glm::mat4(1.0f);
+    beeTransform = glm::translate(beeTransform, glm::vec3(0.0f, 35.0f, 0.0f));  // Translate to (0, 35, 0)
+    beeTransform = glm::scale(beeTransform, glm::vec3(10.0f));  // Scale by a factor of 10
+    drawModel(beeModelGl, entityShader->ID, beeTransform); 
+
+    glm::mat4 boxTransform = glm::mat4(1.0f);
+    boxTransform = glm::translate(boxTransform, glm::vec3(15.0f, 35.0f, 0.0f));  // Translate to (0, 35, 0)
+    boxTransform = glm::scale(boxTransform, glm::vec3(1.0f));  // Scale by a factor of 10
+    drawModel(cubeModelGl, entityShader->ID, boxTransform);
+
+    glm::mat4 swordTrans = glm::mat4(1.0f);
+    swordTrans = glm::translate(swordTrans, glm::vec3(-15.0f, 35.0f, 0.0f));  // Translate to (0, 35, 0)
+    swordTrans = glm::scale(swordTrans, glm::vec3(4.0f));  // Scale by a factor of 10
+    drawModel(swordModelGl, entityShader->ID, swordTrans);
+    
+        
+    
+}
+
+void Main::drawModel(const ModelGL& model, GLuint shaderID, glm::mat4& modelMatrix) {
+
+    // Upload model matrix
+    GLint modelLoc = glGetUniformLocation(shaderID, "model");
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(modelMatrix));
+
+    // Bind texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, model.textureID);
+    glUniform1i(glGetUniformLocation(shaderID, model.uniformName.c_str()), 0); // or use a generic uniform like "mainTex"
+
+    // Draw
+    glBindVertexArray(model.VAO); 
+    glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, 0); 
+    glBindVertexArray(0); 
+
+}
+
 void Main::render() {
 
     // set background & clear screen
@@ -648,18 +694,10 @@ void Main::render() {
         glBindVertexArray(0);
     }
 
-    entityShader->use();
-    glUniformMatrix4fv(entityViewLoc, 1, GL_FALSE, glm::value_ptr(view)); 
-    glUniformMatrix4fv(entityProjLoc, 1, GL_FALSE, glm::value_ptr(projection)); 
-    for (auto& entity : entities) {
-        std::cout << "Rendering entity at position: " << glm::to_string(entity->position) << std::endl; 
-        entity->render(entityShader->ID); 
-        GLenum err;
-        while ((err = glGetError()) != GL_NO_ERROR) {
-            std::cerr << "OpenGL error after rendering entity: " << err << std::endl;
-        }
-        
-    }
+
+    drawMobs(view,projection);
+    
+    
 
 
     renderSun(view,projection,-sunDirection); 
@@ -1104,6 +1142,108 @@ void Main::processChunkMeshingInOrder() {
     }  
 }
 
+void Main::makeBasicModel() {
+
+    beeModel = OBJLoader::LoadOBJ("../ResourceFiles/bee.obj"); 
+    beeModelGl = createModelGL(beeModel, "../ResourceFiles/BeeAtlas.png", entityShader->ID, "beeTexture");
+
+    cubeModel = OBJLoader::LoadOBJ("../ResourceFiles/coolBox.obj");
+    cubeModelGl = createModelGL(cubeModel, "../ResourceFiles/boxTex.png", entityShader->ID, "boxTexture");
+
+    swordModel = OBJLoader::LoadOBJ("../ResourceFiles/sword.obj");
+    swordModelGl = createModelGL(swordModel, "../ResourceFiles/swordTex.png", entityShader->ID, "swordTexture");
+
+}
+
+ModelGL Main::createModelGL(const OBJData& modelData, const std::string& texturePath, GLuint shaderID, const std::string& uniformName) {
+
+    ModelGL m;
+
+    std::vector<float> vertexData;
+    for (size_t i = 0; i < modelData.positions.size(); ++i) {
+        vertexData.push_back(modelData.positions[i].x);
+        vertexData.push_back(modelData.positions[i].y);
+        vertexData.push_back(modelData.positions[i].z);
+
+        if (!modelData.normals.empty()) {
+            vertexData.push_back(modelData.normals[i].x);
+            vertexData.push_back(modelData.normals[i].y);
+            vertexData.push_back(modelData.normals[i].z);
+        }
+        else {
+            vertexData.insert(vertexData.end(), { 0.0f, 0.0f, 1.0f });
+        }
+
+        if (!modelData.texCoords.empty()) {
+            vertexData.push_back(modelData.texCoords[i].x);
+            vertexData.push_back(modelData.texCoords[i].y);
+        }
+        else {
+            vertexData.insert(vertexData.end(), { 0.0f, 0.0f });
+        }
+    }
+
+    glGenVertexArrays(1, &m.VAO);
+    glGenBuffers(1, &m.VBO);
+    glGenBuffers(1, &m.EBO);
+
+    glBindVertexArray(m.VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m.VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), vertexData.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, modelData.indices.size() * sizeof(unsigned int), modelData.indices.data(), GL_STATIC_DRAW);
+
+    GLsizei stride = 8 * sizeof(float);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0); // pos
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float))); // normal
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float))); // texcoord
+    glEnableVertexAttribArray(2);
+
+    glBindVertexArray(0);
+
+    m.textureID = loadTexture(texturePath.c_str());
+    m.indexCount = modelData.indices.size();
+
+    // Bind texture to unit 0 and assign uniform
+    glUseProgram(shaderID);
+    glUniform1i(glGetUniformLocation(shaderID, uniformName.c_str()), 0);
+
+    m.uniformName = uniformName;
+
+    return m;
+}
+
+GLuint Main::loadTexture(const std::string& path) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    // Load image using stb_image
+    int width, height, nrChannels;
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &nrChannels, 0);
+    if (data) {
+        GLenum format = (nrChannels == 3) ? GL_RGB : GL_RGBA;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+    else {
+        std::cerr << "Failed to load texture: " << path << std::endl;
+    }
+
+    stbi_image_free(data);
+    return textureID;
+}
+
 void Main::run() {
 
     glfwMakeContextCurrent(window);
@@ -1128,7 +1268,8 @@ void Main::run() {
 
 
     player->spawn(glm::vec3(10,200,10));
-    entities.push_back(std::make_unique<Bee>(glm::vec3(0, 35, 0)));
+    //entities.push_back(std::make_unique<Bee>(glm::vec3(0, 35, 0)));
+    makeBasicModel();
 
     lastFrame = glfwGetTime();
 

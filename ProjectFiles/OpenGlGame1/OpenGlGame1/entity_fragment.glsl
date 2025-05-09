@@ -6,6 +6,9 @@ in vec2 TexCoord;
 uniform sampler2D texture0;
 
 void main() {
-    vec4 col = texture(texture0, TexCoord);
-    FragColor = vec4(1.0,0.0,0.0,1.0) * col;
+    vec2 flippedTexCoord = vec2(TexCoord.x, 1.0 - TexCoord.y);
+    vec4 texColor = texture(texture0, flippedTexCoord);
+    FragColor = texColor;
+    //FragColor = vec4(TexCoord, 0.0, 1.0); // Visualize the UVs as color
+
 }

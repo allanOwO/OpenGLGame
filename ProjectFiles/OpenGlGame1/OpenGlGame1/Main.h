@@ -23,7 +23,14 @@
 
 #include "Mob.h"
 #include "Bee.h"
+#include "OBJLoader.h"
 
+struct ModelGL {
+	GLuint VAO, VBO, EBO; 
+	GLuint textureID;
+	size_t indexCount; 
+	std::string uniformName;
+}; 
 
 class Main
 {
@@ -82,6 +89,7 @@ private:
 	//buffers store data on gpu, vbo is vertext positions, ebo defines how these connect, vao acts like a container for these
 	unsigned int VBO, normalsVBO, VAO, texture;// vertex buffer, vertext array
 	unsigned int sunVBO, sunVAO, sunEBO;
+	unsigned int beeVBO, beeVAO, beeEBO;
 	Shader* shader;
 	Shader* sunShader;
 	Shader* entityShader;
@@ -149,6 +157,21 @@ private:
 
 	//list of mobs
 	std::vector<std::unique_ptr<Mob>> entities;
+
+	OBJData beeModel;
+	ModelGL beeModelGl; 
+
+	OBJData cubeModel;
+	ModelGL cubeModelGl;
+
+	OBJData swordModel;
+	ModelGL swordModelGl;
+
+	void makeBasicModel();
+	void drawMobs(glm::mat4& view, glm::mat4& projection);
+	void drawModel(const ModelGL& model, GLuint shaderID, glm::mat4& modelMatrix);
+	GLuint loadTexture(const std::string& path);
+	ModelGL createModelGL(const OBJData& modelData, const std::string& texturePath, GLuint shaderID, const std::string& uniformName);
 };
 	
 

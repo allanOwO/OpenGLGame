@@ -193,9 +193,9 @@ void Chunk::generateBlockFaces(PackedVertex*& vertexPtr, unsigned int*& indexPtr
 	glm::vec3 pos = blockPos;
 	float size = 1.0f;
 	glm::vec3 colour(1.0f, 1.0f, 1.0f);//default colour
-	if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
-		colour = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
-	}
+	//if (pos.x == 0 || pos.x == chunkSize - 1 || pos.z == 0 || pos.z == chunkSize - 1) {
+		//colour = glm::vec3(1.0f, 0.0f, 0.0f); // Red for border blocks
+	//}
 
 	// Create an array of cube vertices for this block using the precomputed unit cube vertices.
 	// For each vertex, add the block position to the unit cube vertex, scaled by size. 
