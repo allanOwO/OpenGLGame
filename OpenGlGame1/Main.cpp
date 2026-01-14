@@ -17,7 +17,7 @@
 #define SUN_SPEED 0.1f
 
 FastNoiseLite Main::noiseGen;
-std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
+//std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
 
 
 Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
@@ -114,7 +114,10 @@ void Main::initNoise() {
     noiseGen.SetFrequency(0.03f); // Lower frequency for smoother terrain
     noiseGen.SetSeed(seed);
 
-    int range = CHUNK_SIZE * RENDER_DISTANCE;
+
+    //test wihtout initial cache
+    /*
+    * int range = CHUNK_SIZE * RENDER_DISTANCE;
 
     for (int x = -range; x < range; x++) {
         for (int z = -range; z < range; z++) {
@@ -122,9 +125,15 @@ void Main::initNoise() {
             noiseCache[{x, z}] = getNoise(static_cast<float>(x), static_cast<float>(z));  // Fixed value 
         }
     }
+    
+    */
+    
 }
 
-float Main::getNoise(float x, float z) {
+float Main::getNoise(float x, float z) const{
+
+    //test no cache
+    /*
     glm::ivec2 noiseKey(x, z);
 
     if (noiseCache.find(noiseKey) != noiseCache.end()) {
@@ -136,10 +145,15 @@ float Main::getNoise(float x, float z) {
         noiseCache[noiseKey] = height;
         return height;
     }
+    */
+    
+    float biomeValue = getBiomeNoise(x, z);
+    float warpedHeight = getWarpedHeight(x, z, biomeValue);
+    return remapHeight(warpedHeight, biomeValue);
 }
 
 // New function: Low-frequency noise to determine biome type
-inline float Main::getBiomeNoise(float x, float z) {
+float Main::getBiomeNoise(float x, float z) const{
     float biomeScale = 0.002f; // Very low frequency for large biome areas
     float biomeNoise = Main::noiseGen.GetNoise(x * biomeScale, z * biomeScale);
     //return 1;
@@ -148,7 +162,7 @@ inline float Main::getBiomeNoise(float x, float z) {
 }
 
 //takes 0 to 1 noise value and assigns height in y
-inline float Main::remapHeight(float noiseValue, float biomeValue) {
+float Main::remapHeight(float noiseValue, float biomeValue) const {
     float minHeight = 32.0f;  // Base height
     float maxHeight = 150.0f; // Max height (can increase for taller mountains)
 
@@ -202,7 +216,7 @@ inline float Main::remapHeight(float noiseValue, float biomeValue) {
 }
 
 // Updated getWarpedHeight for more variation
-inline float Main::getWarpedHeight(float x, float z, float biomeValue) {
+float Main::getWarpedHeight(float x, float z, float biomeValue) const{
     float warpScale = 0.2f;
     float warpX = Main::noiseGen.GetNoise(x * warpScale + 10.0f, z * warpScale + 10.0f) * 15.0f; // Increased warp
     float warpZ = Main::noiseGen.GetNoise(x * warpScale + 20.0f, z * warpScale + 20.0f) * 15.0f;
@@ -1094,7 +1108,7 @@ void Main::run() {
         player->update(deltaTime, chunks); 
         processInput(window); 
 
-        processChunkMeshingInOrder();
+        processChunkMeshingInOrder(); 
 
         render();
         doFps();

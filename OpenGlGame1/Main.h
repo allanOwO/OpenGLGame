@@ -41,12 +41,12 @@ public:
 	Chunk* getChunk(const glm::vec3& pos);
 
 	static FastNoiseLite noiseGen;
-	static std::unordered_map<glm::ivec2, float, IVec2Hash> noiseCache; 
+	//static std::unordered_map<glm::ivec2, float, IVec2Hash> noiseCache; //try without cache
 	std::mutex noiseMutex;
 
 	std::unordered_map<uint64_t, Chunk> chunks;
 
-	float getNoise(float x, float z);
+	float getNoise(float x, float z) const;
 
 private:
 
@@ -133,10 +133,9 @@ private:
 
 	//noise for world gen
 	void initNoise();
-	inline float getBiomeNoise(float x, float z);
-	inline float remapHeight(float noiseValue, float biomeValue);
-
-	inline float getWarpedHeight(float x, float z,float biomeValue);
+	float getBiomeNoise(float x, float z) const;
+	float remapHeight(float noiseValue, float biomeValue) const;
+	float getWarpedHeight(float x, float z,float biomeValue) const;
 };
 	
 
