@@ -1,9 +1,18 @@
-# Ignore Visual Studio indexing files
-.vsidx
-# Ignore Visual Studio folder
-.vs/
-# Ignore Visual Studio build log files
-*.tlog
-# Ignore Program Database files (debugging symbols)
+# Build output
+x64/
+Debug/
+Release/
+
+# VS temporary files
+*.suo
+*.user
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+
+# Binaries
+*.exe
+*.dll
+*.obj
 *.pdb
-*.lastbuildstate
+
