@@ -313,9 +313,9 @@ void Main::processInput(GLFWwindow* window)
 }
 
 void Main::createShaders() {
-    shader = new Shader("vertex_shader.glsl", "fragment_shader.glsl");
-    sunShader = new Shader("sunVertex.glsl","sunFragment.glsl");
-    depthShader = new Shader("depth_vertex.glsl", "depth_fragment.glsl");
+    shader = new Shader(getResourcePath("vertex_shader.glsl").c_str(), getResourcePath("fragment_shader.glsl").c_str());
+    sunShader = new Shader(getResourcePath("sunVertex.glsl").c_str(), getResourcePath("sunFragment.glsl").c_str());
+    depthShader = new Shader(getResourcePath("depth_vertex.glsl").c_str(), getResourcePath("depth_fragment.glsl").c_str());
 
     if (sunShader->ID == 0) {
         std::cerr << "Sun shader failed to compile/link" << std::endl;
@@ -790,7 +790,7 @@ void Main::getTextures() {
     int width, height, nrChannels;
 
     // Load another texture for a different block type, e.g., "stone.jpg"
-    unsigned char* data = stbi_load("../ResourceFiles/textureAtlas.png", &width, &height, &nrChannels, 0);
+    unsigned char* data = stbi_load(getResourcePath("textureAtlas.png").c_str(), &width, &height, &nrChannels, 0);
     if (!data) {
         std::cerr << "Failed to load atlas" << std::endl;
         exit(-1);
@@ -811,6 +811,20 @@ void Main::getTextures() {
     glGenerateMipmap(GL_TEXTURE_2D);
     stbi_image_free(data);
 
+}
+ 
+std::string Main::getResourcePath(const std::string& subPath) {
+    // 1. Check current directory (For the Release .exe)
+    if (std::filesystem::exists("ResourceFiles/" + subPath)) {
+        return "ResourceFiles/" + subPath;
+    }
+    // 2. Check one level up (For Visual Studio F5/Debug mode)
+    if (std::filesystem::exists("../ResourceFiles/" + subPath)) {
+        return "../ResourceFiles/" + subPath;
+    }
+
+    // Fallback: return the path as-is
+    return "ResourceFiles/" + subPath;
 }
 
 void Main::doFps() {

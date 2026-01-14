@@ -21,6 +21,8 @@
 #include <glm/vec2.hpp>
 #include "Frustum.h"
 
+#include <filesystem>//to look for resourse file
+
 
 class Main
 {
@@ -136,6 +138,11 @@ private:
 	float getBiomeNoise(float x, float z) const;
 	float remapHeight(float noiseValue, float biomeValue) const;
 	float getWarpedHeight(float x, float z,float biomeValue) const;
+
+	//to find atlas in both vs and build
+	std::string getResourcePath(const std::string& subPath);
+
+	//test
 };
 	
 
