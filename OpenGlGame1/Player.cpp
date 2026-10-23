@@ -45,6 +45,16 @@ void Player::processMouseMovement(double xpos, double ypos) {
     yaw += xoffset;
     pitch += yoffset;
 
+    updateCameraFront();
+}
+
+void Player::setLook(float newYaw, float newPitch) {
+    yaw = newYaw;
+    pitch = newPitch;
+    updateCameraFront();
+}
+
+void Player::updateCameraFront() {
     //vertical clamping
     if (pitch > 89.0f)
         pitch = 89.0f;

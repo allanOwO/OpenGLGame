@@ -154,6 +154,12 @@
     <ClCompile Include="World.cpp" />
     <ClCompile Include="ChunkStorage.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Font.cpp" />
+    <ClCompile Include="UIRenderer.cpp" />
+    <ClCompile Include="UI.cpp" />
+    <ClCompile Include="Menu.cpp" />
+    <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="WorldSave.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockConstants.h" />
@@ -171,6 +177,13 @@
     <ClInclude Include="ChunkStorage.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="ResourcePath.h" />
+    <ClInclude Include="Font.h" />
+    <ClInclude Include="UIRenderer.h" />
+    <ClInclude Include="UI.h" />
+    <ClInclude Include="Menu.h" />
+    <ClInclude Include="Settings.h" />
+    <ClInclude Include="WorldSave.h" />
+    <ClInclude Include="FileUtil.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\ResourceFiles\depth_fragment.glsl" />
@@ -181,6 +194,8 @@
     <None Include="..\ResourceFiles\vertex_shader.glsl" />
     <None Include="..\ResourceFiles\highlight_vertex.glsl" />
     <None Include="..\ResourceFiles\highlight_fragment.glsl" />
+    <None Include="..\ResourceFiles\ui_vertex.glsl" />
+    <None Include="..\ResourceFiles\ui_fragment.glsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\ResourceFiles\textureAtlas.png" />

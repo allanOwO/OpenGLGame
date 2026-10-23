@@ -37,9 +37,17 @@ public:
 
 	bool blockIntersects(const glm::vec3& blockPos) const;
 	void processMouseMovement(double xpos, double ypos);
+	void resetMouse() { firstMouse = true; }//next mouse move is a fresh start, call when the cursor comes back from a menu
+
+	// For saving and loading
+	glm::vec3 getPosition() const { return bodyPos; }//feet
+	float getYaw() const { return yaw; }
+	float getPitch() const { return pitch; }
+	void setLook(float newYaw, float newPitch);
 
 private:
 	void playerMovement(float deltaTime, const World& world);
+	void updateCameraFront();//from yaw and pitch
 	void moveAxis(int axis, float amount, glm::vec3& position, const World& world);
 
 	GLFWwindow* window;

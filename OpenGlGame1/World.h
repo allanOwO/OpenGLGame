@@ -1,6 +1,7 @@
 #pragma once
 #include <unordered_map>
 #include <future>
+#include <string>
 #include <glm/glm.hpp>
 
 #include "Chunk.h"
@@ -20,10 +21,9 @@ struct RaycastHit {
 class World
 {
 public:
-	static constexpr int renderDistance = 64;//in chunks
 	static constexpr int unloadMargin = 2;//extra chunks kept past render distance before unloading
 
-	explicit World(int seed);
+	World(int seed, int renderDistance);
 	~World();
 	World(const World&) = delete;
 	World& operator=(const World&) = delete;
@@ -39,6 +39,18 @@ public:
 
 	const std::unordered_map<uint64_t, Chunk>& getChunks() const { return chunks; }
 	const TerrainGenerator& getTerrain() const { return terrain; }
+	int getSeed() const { return terrain.getSeed(); }
+
+	void setRenderDistance(int chunks);//can change while playing, chunks load/unload to match
+	int getRenderDistance() const { return renderDistance; }
+
+	// True once the chunk under this world position is loaded, so physics doesn't drop the player through it
+	bool isLoadedAt(const glm::vec3& worldPos) const;
+
+	// Saving: writes every modified chunk (loaded or not) to one file
+	bool saveChunks(const std::string& path);
+	// Loading: call before the first update, chunks then come from the file instead of the noise as they load
+	bool loadChunks(const std::string& path);
 
 private:
 	Chunk* findChunk(int chunkX, int chunkZ);//chunk coordinates
@@ -48,7 +60,7 @@ private:
 	void updateLoading(const glm::ivec3& playerChunkPos, const glm::vec3& playerPosition);
 	void unloadFarChunks(const glm::ivec3& playerChunkPos);
 	void generateChunkAsync(int chunkX, int chunkZ);
-	void tryApplyChunkGeneration();
+	void tryApplyChunkGeneration(bool waitForAll = false);
 	void markNeighboursForRebuild(int chunkX, int chunkZ);
 
 	// meshing
@@ -67,6 +79,7 @@ private:
 	std::unordered_map<uint64_t, std::future<Chunk>> chunkGenerationFutures;
 	std::unordered_map<uint64_t, std::future<MeshData>> chunkMeshFutures;
 
+	int renderDistance;//in chunks
 	bool isInitialLoading = true; // Flag to track initial loading phase
 	int currentLoadingRadius = 0; // Current radius for loading chunks, grows to renderDistance
 };

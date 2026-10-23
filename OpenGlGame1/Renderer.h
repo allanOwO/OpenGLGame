@@ -20,8 +20,9 @@ public:
 	Renderer& operator=(const Renderer&) = delete;
 
 	// highlight can be nullptr when the player isn't looking at a block
+	// farPlane should reach past the furthest loaded chunk or the edge of the world gets cut off
 	void render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
-		int width, int height, float time, const RaycastHit* highlight);
+		int width, int height, float time, float farPlane, const RaycastHit* highlight);
 
 private:
 	void createShaders();

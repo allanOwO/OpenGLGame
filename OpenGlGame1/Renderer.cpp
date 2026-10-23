@@ -195,9 +195,9 @@ void Renderer::createHighlight() {
 // ---------- per frame ----------
 
 void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
-    int width, int height, float time, const RaycastHit* highlight) {
+    int width, int height, float time, float farPlane, const RaycastHit* highlight) {
 
-    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, farPlane);
 
     //whats in current view
     glm::mat4 viewProj = projection * view;

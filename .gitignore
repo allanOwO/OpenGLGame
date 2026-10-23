@@ -26,3 +26,7 @@ Release/
 *.tlog
 *.log
 *.recipe
+
+# Player data written by the game (world saves, options)
+saves/
+settings.txt

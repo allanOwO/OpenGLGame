@@ -15,7 +15,40 @@ static int floorDiv(int a, int b) {
     return static_cast<int>(std::floor(static_cast<float>(a) / b));
 }
 
-World::World(int seed) : terrain(seed) {
+World::World(int seed, int renderDistance) : terrain(seed), renderDistance(renderDistance) {
+}
+
+void World::setRenderDistance(int chunks) {
+    renderDistance = chunks;
+    if (isInitialLoading) currentLoadingRadius = std::min(currentLoadingRadius, renderDistance);
+}
+
+bool World::isLoadedAt(const glm::vec3& worldPos) const {
+    int chunkX = static_cast<int>(std::floor(worldPos.x / Chunk::chunkSize));
+    int chunkZ = static_cast<int>(std::floor(worldPos.z / Chunk::chunkSize));
+    return findChunk(chunkX, chunkZ) != nullptr;
+}
+
+// ---------- saving ----------
+
+bool World::saveChunks(const std::string& path) {
+    // A chunk being restored from storage is in neither storage nor chunks until its job finishes
+    // Finish those first or their edits would be missing from the save
+    tryApplyChunkGeneration(true);
+
+    // Unloaded edited chunks are already encoded in storage, add the edited chunks that are still loaded
+    // Done on a copy, storage only ever holds chunks that aren't loaded
+    ChunkStorage snapshot = storage;
+    for (const auto& pair : chunks) {
+        if (pair.second.modified) {
+            snapshot.store(pair.first, encodeBlocks(pair.second.blocks));
+        }
+    }
+    return snapshot.saveToFile(path);
+}
+
+bool World::loadChunks(const std::string& path) {
+    return storage.loadFromFile(path);
 }
 
 World::~World() {
@@ -128,9 +161,10 @@ void World::generateChunkAsync(int chunkX, int chunkZ) {
         });
 }
 
-void World::tryApplyChunkGeneration() {
+void World::tryApplyChunkGeneration(bool waitForAll) {
     for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
-        if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        // waitForAll blocks on unfinished jobs (used before saving), otherwise only take the finished ones
+        if (waitForAll || it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
 
             uint64_t key = it->first; // The key is the uint64_t chunk identifier
             auto inserted = chunks.emplace(key, it->second.get());

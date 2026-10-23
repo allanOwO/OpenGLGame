@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <vector>
 #include <unordered_map>
+#include <string>
 #include "BlockType.h"
 
 // Encodes a chunk's blocks as runs of (block type, count), most chunks are long runs so this is tiny
@@ -25,6 +26,12 @@ public:
 	bool take(uint64_t key, std::vector<uint8_t>& outData);
 
 	size_t size() const { return chunks.size(); }
+
+	// Chunk file layout (little endian):
+	//   "VXCK" magic, uint32 file version, uint32 chunk count
+	//   per chunk: int32 chunk x, int32 chunk z, uint32 byte count, encoded blocks (see encodeBlocks)
+	bool saveToFile(const std::string& path) const;
+	bool loadFromFile(const std::string& path);//false if missing or corrupt, storage is left unchanged then
 
 private:
 	std::unordered_map<uint64_t, std::vector<uint8_t>> chunks;

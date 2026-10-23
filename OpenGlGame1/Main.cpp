@@ -2,29 +2,40 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <cmath>
 
 static const float PHYSICS_STEP = 1.0f / 120.0f; // seconds per physics update
+static const char* SETTINGS_FILE = "settings.txt";
 
 Main::Main() {
     init();
+    settings.load(SETTINGS_FILE);//keeps the defaults if there's no file yet
 
-    std::random_device rd;
-    int seed = static_cast<int>(rd());
-    std::cout << "Seed: " << seed << std::endl;
-
-    world = std::make_unique<World>(seed);
     renderer = std::make_unique<Renderer>();
-    player = std::make_unique<Player>(window);
+    uiRenderer = std::make_unique<UIRenderer>();
+    ui = std::make_unique<UI>(*uiRenderer);
+    menu.open(MenuScreen::Title);
 }
 
 Main::~Main() {
-    // Order matters: World and Renderer delete GL objects, so they go before the window/context
-    player.reset();
-    world.reset();//waits for worker threads, then frees chunk buffers
+    // Closing the window while playing shouldn't lose anything
+    if (world) saveWorld();
+    if (settingsDirty) settings.save(SETTINGS_FILE);
+
+    // Order matters: these delete GL objects, so they go before the window/context
+    unloadWorld();//waits for worker threads, then frees chunk buffers
+    ui.reset();
+    uiRenderer.reset();
     renderer.reset();
 
     glfwDestroyWindow(window);
     glfwTerminate();
+}
+
+// ---------- window and input callbacks ----------
+
+Main* Main::fromWindow(GLFWwindow* window) {
+    return static_cast<Main*>(glfwGetWindowUserPointer(window));
 }
 
 void Main::framebufferSizeCallback(GLFWwindow* window, int width, int height)
@@ -33,18 +44,58 @@ void Main::framebufferSizeCallback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 
     // Update the width and height in the Main class
-    Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
-    if (mainInstance) {
-        mainInstance->width = width;
-        mainInstance->height = height;
+    if (Main* main = fromWindow(window)) {
+        main->width = width;
+        main->height = height;
     }
 }
 
 void Main::cursorPosCallback(GLFWwindow* window, double xpos, double ypos)
 {
-    Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
-    if (mainInstance && mainInstance->player) {
-        mainInstance->player->processMouseMovement(xpos, ypos);
+    Main* main = fromWindow(window);
+    if (!main) return;
+    main->mousePosition = glm::vec2(static_cast<float>(xpos), static_cast<float>(ypos));
+    // Only turn the camera while actually playing, in menus the mouse moves the cursor
+    if (main->player && main->cursorCaptured) {
+        main->player->processMouseMovement(xpos, ypos);
+    }
+}
+
+void Main::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+{
+    // A click can be shorter than a frame, so remember it here instead of polling for it
+    Main* main = fromWindow(window);
+    if (main && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        main->pendingInput.mousePressed = true;
+    }
+}
+
+void Main::charCallback(GLFWwindow* window, unsigned int codepoint)
+{
+    // Typed text (respects shift, keyboard layout etc), only ASCII since that's what the font has
+    Main* main = fromWindow(window);
+    if (main && codepoint < 128) {
+        main->pendingInput.typed.push_back(static_cast<char>(codepoint));
+    }
+}
+
+void Main::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    Main* main = fromWindow(window);
+    if (!main) return;
+    // Repeat lets holding backspace delete several characters
+    if (key == GLFW_KEY_BACKSPACE && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
+        main->pendingInput.backspaces++;
+    }
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+        main->escapePressed = true;
+    }
+}
+
+void Main::scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    if (Main* main = fromWindow(window)) {
+        main->pendingInput.scroll += static_cast<float>(yoffset);
     }
 }
 
@@ -80,11 +131,19 @@ void Main::init() {
         exit(-1);
     }
 
+    // The window may not be the size we asked for (e.g. bigger than the screen)
+    glfwGetFramebufferSize(window, &width, &height);
+
     // Callbacks, the user pointer lets the static callbacks find this Main
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetCursorPosCallback(window, cursorPosCallback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetMouseButtonCallback(window, mouseButtonCallback);
+    glfwSetCharCallback(window, charCallback);
+    glfwSetKeyCallback(window, keyCallback);
+    glfwSetScrollCallback(window, scrollCallback);
+    // Starts on the title screen, so the cursor is visible (captured when a world starts, see updateCursorMode)
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
     //some opengl settings
     glEnable(GL_CULL_FACE);   // Enable face culling
@@ -95,13 +154,43 @@ void Main::init() {
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);//wireframe mode
 }
 
-void Main::processInput()
+// ---------- playing ----------
+
+void Main::updateGame(float deltaTime) {
+    // Until the chunk under the player exists there's nothing to stand on, so hold physics
+    // (otherwise a loaded save can drop the player through the ground before it generates)
+    if (!world->isLoadedAt(player->getPosition())) {
+        physicsAccumulator = 0.0f;
+        return;
+    }
+
+    // Physics runs in fixed steps so movement is the same at any frame rate
+    physicsAccumulator += deltaTime;
+    while (physicsAccumulator >= PHYSICS_STEP) {
+        player->update(PHYSICS_STEP, *world);
+        physicsAccumulator -= PHYSICS_STEP;
+    }
+    // Camera blends between the last two steps so it stays smooth above the physics rate
+    player->interpolate(physicsAccumulator / PHYSICS_STEP);
+
+    // What the player is looking at, used for building and the outline
+    hasTarget = world->raycast(player->getCameraPos(), player->getCameraFront(), reachDistance, target);
+    processGameInput();
+}
+
+void Main::processGameInput()
 {
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)//check for esc pressed
-        glfwSetWindowShouldClose(window, true);
+    bool leftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    bool rightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+
+    // The click on "RESUME" is still held when the game starts again, wait for it to be let go
+    if (ignoreMouseUntilRelease) {
+        if (leftDown || rightDown) return;
+        ignoreMouseUntilRelease = false;
+    }
 
     //building
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+    if (leftDown) {
         static double lastBreakTime = 0.0;
         double currentTime = glfwGetTime();
         if (currentTime - lastBreakTime > 0.2) { // 0.2s cooldown
@@ -109,7 +198,7 @@ void Main::processInput()
             lastBreakTime = currentTime;
         }
     }
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+    if (rightDown) {
         static double lastPlaceTime = 0.0;
         double currentTime = glfwGetTime();
         if (currentTime - lastPlaceTime > 0.2) { // 0.2s cooldown
@@ -134,6 +223,150 @@ void Main::breakBlock() {
     world->setBlock(target.block, BlockType::AIR);
 }
 
+// ---------- worlds ----------
+
+void Main::startWorld(const WorldInfo& info) {
+    unloadWorld();
+    currentWorld = info;
+    std::cout << "Opening world '" << info.name << "', seed " << info.seed << std::endl;
+
+    world = std::make_unique<World>(info.seed, settings.renderDistance);
+    // Edited chunks come from the save, everything else regenerates from the seed (missing file = new world)
+    world->loadChunks(WorldSave::chunksPath(info.name));
+
+    player = std::make_unique<Player>(window);
+    if (info.hasPlayer) {
+        player->spawn(info.playerPosition);
+        player->setLook(info.yaw, info.pitch);
+    }
+    else {
+        // New world: stand on top of the terrain at the origin
+        // getHeight is in chunk local y, chunks sit baseTerrainHeight below world y = 0
+        int surface = static_cast<int>(world->getTerrain().getHeight(0.0f, 0.0f)) - Chunk::baseTerrainHeight;
+        player->spawn(glm::vec3(0.5f, surface + 1.0f, 0.5f));
+    }
+
+    physicsAccumulator = 0.0f;
+    hasTarget = false;
+    menu.close();
+}
+
+bool Main::saveWorld() {
+    if (!world) return false;
+
+    currentWorld.hasPlayer = true;
+    currentWorld.playerPosition = player->getPosition();
+    currentWorld.yaw = player->getYaw();
+    currentWorld.pitch = player->getPitch();
+
+    // Chunks first: world.txt is what makes the folder show up as a world, so it's written last
+    bool chunksSaved = world->saveChunks(WorldSave::chunksPath(currentWorld.name));
+    bool infoSaved = WorldSave::writeInfo(currentWorld);
+    if (!chunksSaved || !infoSaved) {
+        std::cerr << "Saving world '" << currentWorld.name << "' failed" << std::endl;
+    }
+    return chunksSaved && infoSaved;
+}
+
+void Main::unloadWorld() {
+    player.reset();
+    world.reset();
+    hasTarget = false;
+}
+
+// ---------- menus ----------
+
+void Main::handleMenuAction(const MenuAction& action) {
+    using Type = MenuAction::Type;
+    switch (action.type) {
+    case Type::Quit:
+        glfwSetWindowShouldClose(window, true);
+        break;
+
+    case Type::CreateWorld: {
+        WorldInfo info;
+        info.name = action.worldName;
+        if (!Menu::parseSeed(action.seedText, info.seed)) {
+            std::random_device rd;
+            info.seed = static_cast<int>(rd());
+        }
+        // Write world.txt straight away so the world exists even if the game crashes before the first save
+        if (!WorldSave::writeInfo(info)) {
+            menu.showMessage("COULDN'T CREATE THE WORLD FOLDER");
+            break;
+        }
+        startWorld(info);
+        break;
+    }
+
+    case Type::LoadWorld: {
+        WorldInfo info;
+        if (!WorldSave::readInfo(action.worldName, info)) {
+            menu.showMessage("COULDN'T READ THAT WORLD");
+            break;
+        }
+        startWorld(info);
+        break;
+    }
+
+    case Type::Resume:
+        menu.close();
+        break;
+
+    case Type::SaveWorld:
+        menu.showMessage(saveWorld() ? "GAME SAVED" : "SAVE FAILED");
+        break;
+
+    case Type::SaveAndExitToTitle:
+        saveWorld();
+        unloadWorld();
+        menu.open(MenuScreen::Title);
+        break;
+
+    case Type::SaveAndQuit:
+        saveWorld();
+        unloadWorld();//already saved, so the destructor doesn't save again
+        glfwSetWindowShouldClose(window, true);
+        break;
+
+    case Type::SettingsChanged:
+        if (world) world->setRenderDistance(settings.renderDistance);
+        settingsDirty = true;
+        break;
+
+    default:
+        break;
+    }
+}
+
+void Main::handleEscape() {
+    if (world && !menu.isOpen()) menu.open(MenuScreen::Pause);
+    else menu.goBack();
+}
+
+void Main::updateCursorMode() {
+    // Captured (hidden, mouse turns the camera) only while playing with no menu open
+    bool wantCaptured = world && !menu.isOpen();
+    if (wantCaptured == cursorCaptured) return;
+
+    cursorCaptured = wantCaptured;
+    glfwSetInputMode(window, GLFW_CURSOR, wantCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    if (wantCaptured) {
+        player->resetMouse();//cursor moved while in the menu, don't turn that into a camera jump
+        ignoreMouseUntilRelease = true;
+    }
+}
+
+void Main::drawCrosshair(const UIInput& input) {
+    ui->beginFrame(input, width, height);
+    float s = static_cast<float>(ui->scale());
+    float cx = std::round(width * 0.5f), cy = std::round(height * 0.5f);
+    glm::vec4 colour(1.0f, 1.0f, 1.0f, 0.8f);
+    ui->panel(cx - 5 * s, cy - s * 0.5f, 10 * s, s, colour);
+    ui->panel(cx - s * 0.5f, cy - 5 * s, s, 10 * s, colour);
+    ui->endFrame();
+}
+
 void Main::doFps() {
     float currentTime = glfwGetTime();
     frameCount++;
@@ -144,14 +377,14 @@ void Main::doFps() {
         frameCount = 0;
         lastFPSTime = currentTime;
 
-        glm::ivec3 position = player->getCameraPos();
-
         // Update window title with FPS
-        std::string title = "My Game - FPS: " + std::to_string(fps)
-            + " Position: "
-            + "X:" + std::to_string(position.x)
-            + " Y:" + std::to_string(position.y)
-            + " Z:" + std::to_string(position.z);
+        std::string title = "My Game - FPS: " + std::to_string(fps);
+        if (player) {
+            glm::ivec3 position = player->getCameraPos();
+            title += " Position: X:" + std::to_string(position.x)
+                + " Y:" + std::to_string(position.y)
+                + " Z:" + std::to_string(position.z);
+        }
 
         glfwSetWindowTitle(window, title.c_str());
     }
@@ -159,7 +392,6 @@ void Main::doFps() {
 
 void Main::run() {
 
-    player->spawn(glm::vec3(10, 200, 10));
     lastFrame = glfwGetTime();
 
     // Main loop
@@ -169,29 +401,64 @@ void Main::run() {
         float deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        // Cap deltaTime so a long stall (window drag, breakpoint) doesn't run hundreds of physics steps
+        // Cap deltaTime so a long stall (window drag, breakpoint, saving) doesn't run hundreds of physics steps
         const float maxDeltaTime = 0.25f;
         if (deltaTime > maxDeltaTime) {
             deltaTime = maxDeltaTime;
         }
 
-        // Physics runs in fixed steps so movement is the same at any frame rate
-        physicsAccumulator += deltaTime;
-        while (physicsAccumulator >= PHYSICS_STEP) {
-            player->update(PHYSICS_STEP, *world);
-            physicsAccumulator -= PHYSICS_STEP;
+        // Hand this frame's input to the UI and start collecting the next frame's
+        UIInput input = pendingInput;
+        pendingInput = UIInput();
+        input.mouse = mousePosition;
+        input.mouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        input.time = currentFrame;
+
+        if (escapePressed) {
+            escapePressed = false;
+            handleEscape();
         }
-        // Camera blends between the last two steps so it stays smooth above the physics rate
-        player->interpolate(physicsAccumulator / PHYSICS_STEP);
 
-        // What the player is looking at, used for building and the outline
-        hasTarget = world->raycast(player->getCameraPos(), player->getCameraFront(), reachDistance, target);
-        processInput();
+        bool playing = world && !menu.isOpen();
+        if (playing) {
+            updateGame(deltaTime);
+        }
+        if (world) {
+            // Keeps loading chunks while paused, so the world is ready when you resume
+            world->update(player->getCameraPos());
+        }
 
-        world->update(player->getCameraPos());
+        // 3D world, or a plain background on the title screens
+        if (world) {
+            float farPlane = (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f;
+            renderer->render(*world, player->getCameraPos(), player->getViewMatrix(),
+                width, height, currentFrame, farPlane, playing && hasTarget ? &target : nullptr);
+        }
+        else {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, width, height);
+            glClearColor(0.08f, 0.10f, 0.14f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
 
-        renderer->render(*world, player->getCameraPos(), player->getViewMatrix(),
-            width, height, currentFrame, hasTarget ? &target : nullptr);
+        // UI on top
+        if (menu.isOpen()) {
+            ui->beginFrame(input, width, height);
+            MenuAction action = menu.draw(*ui, settings, currentFrame);
+            ui->endFrame();
+            handleMenuAction(action);
+        }
+        else if (world) {
+            drawCrosshair(input);
+        }
+
+        // Settings are written once you leave the settings screen, not on every slider step
+        if (settingsDirty && menu.current() != MenuScreen::Settings) {
+            settings.save(SETTINGS_FILE);
+            settingsDirty = false;
+        }
+
+        updateCursorMode();
         doFps();
 
 #ifdef _DEBUG
