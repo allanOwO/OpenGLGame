@@ -150,6 +150,9 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="Player.cpp" />
     <ClCompile Include="Shader.cpp" />
+    <ClCompile Include="TerrainGenerator.cpp" />
+    <ClCompile Include="World.cpp" />
+    <ClCompile Include="Renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockConstants.h" />
@@ -160,8 +163,12 @@
     <ClInclude Include="MeshData.h" />
     <ClInclude Include="Player.h" />
     <ClInclude Include="Shader.h" />
-    <ClInclude Include="Vec3Hash.h" />
+    <ClInclude Include="ChunkKey.h" />
     <ClInclude Include="VertexPacking.h" />
+    <ClInclude Include="TerrainGenerator.h" />
+    <ClInclude Include="World.h" />
+    <ClInclude Include="Renderer.h" />
+    <ClInclude Include="ResourcePath.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\ResourceFiles\depth_fragment.glsl" />

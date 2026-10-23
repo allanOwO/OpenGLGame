@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cstddef>//offsetof
 
-#include "Main.h"//need for full main deffinition
+#include "TerrainGenerator.h"
 #include "BlockConstants.h"
 
 //neighbour direction for each face, same order as faces[] in BlockConstants
@@ -19,13 +19,8 @@ static const glm::ivec3 faceOffsets[6] = {
 };
 
 
-Chunk::Chunk(glm::ivec3 position, const Main* m)
+Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain)
 	: chunkPosition(position), blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR) {
-
-	if (!m) {
-		std::cerr << "main nullptr" << "\n";
-		return;
-	}
 
 	for (int x = 0; x < chunkSize; x++) {
 		for (int z = 0; z < chunkSize; z++) {
@@ -33,7 +28,7 @@ Chunk::Chunk(glm::ivec3 position, const Main* m)
 			float worldX = chunkPosition.x + x;
 			float worldZ = chunkPosition.z + z;
 
-			float height = m->getNoise(worldX, worldZ);
+			float height = terrain.getHeight(worldX, worldZ);
 
 			int terrainHeight = static_cast<int>(height);
 			for (int y = 0; y < chunkHeight; y++) {

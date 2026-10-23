@@ -10,7 +10,7 @@
 #include <glm/packing.hpp>
 
 
-class Main;//forward declaration
+class TerrainGenerator;//forward declaration, Chunk only needs a reference
 
 class Chunk
 {
@@ -21,7 +21,7 @@ public:
 	int currentTallestBlock = 0;//for fustrum culling , avoids it detecting air as in culling view
 	bool isActive = true;
 
-	Chunk(glm::ivec3 position, const Main* m);//constructor, generates terrain (safe to run on a worker thread)
+	Chunk(glm::ivec3 position, const TerrainGenerator& terrain);//constructor, generates terrain (safe to run on a worker thread)
 	~Chunk();
 	// Delete copy constructor and copy assignment operator
 	Chunk(const Chunk&) = delete;

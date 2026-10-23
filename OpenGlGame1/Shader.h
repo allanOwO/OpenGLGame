@@ -16,6 +16,10 @@ public:
 
     // Constructor that reads and builds the shader
     Shader(const char* vertexPath, const char* fragmentPath);
+    ~Shader();
+    // One Shader owns one GL program, copying would delete it twice
+    Shader(const Shader&) = delete;
+    Shader& operator=(const Shader&) = delete;
 
     // Activate the shader program
     void use();
