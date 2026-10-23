@@ -41,10 +41,10 @@ public:
 
 	void run();
 	Chunk* getChunk(const glm::vec3& pos);
+	Player* getPlayer() const { return player.get(); }
 
-	static FastNoiseLite noiseGen;
+	static FastNoiseLite noiseGen;//GetNoise is const, safe to share between generation threads
 	//static std::unordered_map<glm::ivec2, float, IVec2Hash> noiseCache; //try without cache
-	std::mutex noiseMutex;
 
 	std::unordered_map<uint64_t, Chunk> chunks;
 

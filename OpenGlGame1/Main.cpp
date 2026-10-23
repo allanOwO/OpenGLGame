@@ -87,6 +87,7 @@ void Main::init() {
     }
 
     // Set framebuffer size callback  
+    glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     createShadowMap();
 
@@ -724,9 +725,9 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
     {
         std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Lock here
         for (const auto& pair : chunkPositions) {
-            if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) break;
-
             loadedChunks.insert(pair.first);
+            if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) continue;
+
             int chunkX = static_cast<int32_t>(pair.first >> 32); // Extract x
             int chunkZ = static_cast<int32_t>(pair.first & 0xFFFFFFFF); // Extract z
             glm::vec3 realChunkPos(chunkX * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkZ * CHUNK_SIZE);
@@ -777,7 +778,7 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
 Chunk* Main::getChunk(const glm::vec3& pos) {
     std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Keep this for external access
 
-    uint64_t key = getChunkKey(pos.x, pos.z);
+    uint64_t key = getChunkKey(static_cast<int>(floor(pos.x / CHUNK_SIZE)), static_cast<int>(floor(pos.z / CHUNK_SIZE)));
     // Look up the chunk
     auto it = chunks.find(key);
     return (it != chunks.end()) ? &it->second : nullptr;
@@ -1052,17 +1053,10 @@ void Main::processChunkMeshingInOrder() {
     glm::ivec3 playerChunkPos = glm::ivec3(
         floor(player->getCameraPos().x / CHUNK_SIZE),
         0, // Y is fixed at 0 for chunk coordinates
-        floor(player->getCameraPos().x / CHUNK_SIZE)
+        floor(player->getCameraPos().z / CHUNK_SIZE)
     );
 
-    //pos in world space,locked to chunk ( 0,0,16)
-    glm::vec3 playerChunkRealPos = glm::vec3(
-        playerChunkPos.x * CHUNK_SIZE,
-        -Chunk::baseTerrainHeight,
-        playerChunkPos.z * CHUNK_SIZE
-    );
-
-    uint64_t key = getChunkKey(playerChunkRealPos.x, playerChunkRealPos.z);
+    uint64_t key = getChunkKey(playerChunkPos.x, playerChunkPos.z);
     // Look up the chunk
     auto playerChunkIt = chunks.find(key);
      

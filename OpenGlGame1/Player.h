@@ -36,10 +36,9 @@ public:
 	glm::mat4 getViewMatrix() const; 
 
 	bool blockIntersects(const glm::vec3& blockPos) const;
-	
+	void processMouseMovement(GLFWwindow* window, double xpos, double ypos);
 
 private:
-	void processMouseMovement(GLFWwindow* window, double xpos, double ypos);
 	void playerMovement(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks);
 
 	GLFWwindow* window;	

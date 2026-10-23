@@ -12,12 +12,10 @@ Player::Player(GLFWwindow* window,Main* main)
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    // Set GLFW window user pointer to this instance
-    glfwSetWindowUserPointer(window, this);
-
-    // Register a lambda for the mouse callback
+    // Register a lambda for the mouse callback, window user pointer is owned by Main
     glfwSetCursorPosCallback(window, [](GLFWwindow* window, double xpos, double ypos) {
-        Player* player = static_cast<Player*>(glfwGetWindowUserPointer(window));
+        Main* mainInstance = static_cast<Main*>(glfwGetWindowUserPointer(window));
+        Player* player = mainInstance ? mainInstance->getPlayer() : nullptr;
         if (player) {
             player->processMouseMovement(window,static_cast<float>(xpos), static_cast<float>(ypos)); 
         }

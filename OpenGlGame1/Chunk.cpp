@@ -18,8 +18,6 @@ Chunk::Chunk(glm::ivec3 position,int seed, Main* m)
 
 	//use noise, with caching, from main
 	if (!main) std::cerr << "main nullptr" << "\n";
-	 
-	std::lock_guard<std::mutex> lock(main->noiseMutex); 
 
 	for (int x = 0; x < chunkSize; x++) { 
 		for (int z = 0; z < chunkSize; z++) {
