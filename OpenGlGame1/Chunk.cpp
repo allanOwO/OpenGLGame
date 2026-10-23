@@ -55,6 +55,21 @@ Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain)
 	}
 }
 
+Chunk::Chunk(glm::ivec3 position, std::vector<BlockType> savedBlocks)
+	: chunkPosition(position), blocks(std::move(savedBlocks)), modified(true) {
+	// Still modified, if it unloads again it has to be stored again
+
+	// Find the tallest block for frustum culling until the first mesh works it out exactly
+	for (int y = chunkHeight - 1; y >= 0 && currentTallestBlock == 0; y--) {
+		for (int i = 0; i < chunkSize * chunkSize; i++) {
+			if (blocks[getBlockIndex(0, y, 0) + i] != BlockType::AIR) {
+				currentTallestBlock = y;
+				break;
+			}
+		}
+	}
+}
+
 Chunk::~Chunk() {
 	releaseBuffers();
 }
@@ -63,7 +78,7 @@ Chunk::Chunk(Chunk&& other) noexcept
 	: currentTallestBlock(other.currentTallestBlock), isActive(other.isActive),
 	VBO(other.VBO), VAO(other.VAO), EBO(other.EBO), indexCount(other.indexCount),
 	chunkPosition(other.chunkPosition), blocks(std::move(other.blocks)),
-	fullRebuildNeeded(other.fullRebuildNeeded)
+	fullRebuildNeeded(other.fullRebuildNeeded), modified(other.modified)
 {
 	// Reset the other object's buffer IDs to prevent double deletion
 	other.VAO = 0;
@@ -85,6 +100,7 @@ Chunk& Chunk::operator=(Chunk&& other) noexcept {
 		chunkPosition = other.chunkPosition;
 		blocks = std::move(other.blocks);
 		fullRebuildNeeded = other.fullRebuildNeeded;
+		modified = other.modified;
 
 		other.VAO = 0;
 		other.VBO = 0;
@@ -246,6 +262,7 @@ void Chunk::setBlock(int x, int y, int z, BlockType type) {
 
 	blocks[getBlockIndex(x, y, z)] = type;
 	fullRebuildNeeded = true;
+	modified = true;
 }
 
 BlockType Chunk::getBlock(int x, int y, int z) const {

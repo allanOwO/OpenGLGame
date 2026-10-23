@@ -22,6 +22,7 @@ public:
 	bool isActive = true;
 
 	Chunk(glm::ivec3 position, const TerrainGenerator& terrain);//constructor, generates terrain (safe to run on a worker thread)
+	Chunk(glm::ivec3 position, std::vector<BlockType> savedBlocks);//restores a chunk the player modified earlier
 	~Chunk();
 	// Delete copy constructor and copy assignment operator
 	Chunk(const Chunk&) = delete;
@@ -49,6 +50,7 @@ public:
 
 	std::vector<BlockType> blocks;//dense array, uses more ram, quicker lookup
 	bool fullRebuildNeeded = true;
+	bool modified = false;//player changed a block, so it must be kept when unloaded (it can't be regenerated)
 
 private:
 	void releaseBuffers();

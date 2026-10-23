@@ -7,6 +7,7 @@
 #include "ChunkKey.h"
 #include "MeshData.h"
 #include "TerrainGenerator.h"
+#include "ChunkStorage.h"
 
 // Result of World::raycast
 struct RaycastHit {
@@ -55,6 +56,9 @@ private:
 	void launchChunkMesh(uint64_t key, Chunk& chunk);
 
 	TerrainGenerator terrain;
+
+	// Modified chunks that are currently unloaded, a world is its seed + these + the modified chunks still loaded
+	ChunkStorage storage;
 
 	//only touched on the main thread, worker threads get copies (see ChunkMeshInput)
 	std::unordered_map<uint64_t, Chunk> chunks;

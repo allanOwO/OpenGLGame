@@ -152,6 +152,7 @@
     <ClCompile Include="Shader.cpp" />
     <ClCompile Include="TerrainGenerator.cpp" />
     <ClCompile Include="World.cpp" />
+    <ClCompile Include="ChunkStorage.cpp" />
     <ClCompile Include="Renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -167,6 +168,7 @@
     <ClInclude Include="VertexPacking.h" />
     <ClInclude Include="TerrainGenerator.h" />
     <ClInclude Include="World.h" />
+    <ClInclude Include="ChunkStorage.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="ResourcePath.h" />
   </ItemGroup>

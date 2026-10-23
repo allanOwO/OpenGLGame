@@ -108,10 +108,22 @@ void World::updateLoading(const glm::ivec3& playerChunkPos, const glm::vec3& pla
 
 void World::generateChunkAsync(int chunkX, int chunkZ) {
     // Launch async task to generate the chunk, the chunk is only added to the map on the main thread
+    uint64_t key = getChunkKey(chunkX, chunkZ);
     glm::ivec3 position(chunkX * Chunk::chunkSize, -Chunk::baseTerrainHeight, chunkZ * Chunk::chunkSize);
     const TerrainGenerator* terrainPtr = &terrain;//worker only reads it
 
-    chunkGenerationFutures[getChunkKey(chunkX, chunkZ)] = std::async(std::launch::async, [terrainPtr, position]() {
+    // If the player changed this chunk before, rebuild it from the stored blocks instead of the noise
+    std::vector<uint8_t> savedData;
+    storage.take(key, savedData);//leaves savedData empty if there's nothing stored
+
+    chunkGenerationFutures[key] = std::async(std::launch::async, [terrainPtr, position, savedData = std::move(savedData)]() {
+        if (!savedData.empty()) {
+            std::vector<BlockType> blocks;
+            if (decodeBlocks(savedData, static_cast<size_t>(Chunk::chunkSize) * Chunk::chunkHeight * Chunk::chunkSize, blocks)) {
+                return Chunk(position, std::move(blocks));
+            }
+            std::cerr << "Stored chunk at " << position.x << ", " << position.z << " is corrupt, regenerating it" << std::endl;
+        }
         return Chunk(position, *terrainPtr);
         });
 }
@@ -155,6 +167,10 @@ void World::unloadFarChunks(const glm::ivec3& playerChunkPos) {
         int dx = std::abs(chunkKeyX(it->first) - playerChunkPos.x);
         int dz = std::abs(chunkKeyZ(it->first) - playerChunkPos.z);
         if (dx > unloadDistance || dz > unloadDistance) {
+            // Unmodified chunks can be regenerated from the seed, only player edits need keeping
+            if (it->second.modified) {
+                storage.store(it->first, encodeBlocks(it->second.blocks));
+            }
             // Any mesh job still running for it only has a copy, its result is dropped when it finishes
             it = chunks.erase(it);
         }
