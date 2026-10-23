@@ -22,30 +22,31 @@
 #include "Frustum.h"
 
 #include <filesystem>//to look for resourse file
+#include <algorithm>
 
 
 class Main
 {
 public:
 	//thread count
-	static const size_t MAX_ASYNC_TASKS() {
-		return std::thread::hardware_concurrency();
-	} 
-		
-	size_t activeAsyncTasks = 0; // Track running tasks
-	std::recursive_mutex chunksMutex; 
-	std::mutex logMutex;
+	static size_t MAX_ASYNC_TASKS() {
+		return std::max(1u, std::thread::hardware_concurrency());
+	}
+
 	Main();
 	~Main();
 	float width, height;
 
 	void run();
-	Chunk* getChunk(const glm::vec3& pos);
+	Chunk* getChunk(const glm::vec3& pos);//world position
+	Chunk* findChunk(int chunkX, int chunkZ);//chunk coordinates
+	BlockType getWorldBlock(const glm::ivec3& worldPos);//AIR if the chunk isn't loaded
 	Player* getPlayer() const { return player.get(); }
 
 	static FastNoiseLite noiseGen;//GetNoise is const, safe to share between generation threads
 	//static std::unordered_map<glm::ivec2, float, IVec2Hash> noiseCache; //try without cache
 
+	//only touched on the main thread, worker threads get copies (see ChunkMeshInput)
 	std::unordered_map<uint64_t, Chunk> chunks;
 
 	float getNoise(float x, float z) const;
@@ -62,7 +63,8 @@ private:
 	void processInput(GLFWwindow* window);
 
 	std::string loadShader(const char* filepath);
-	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, lightColourLoc, lightPosLoc, sunDirLoc, camPosLoc;
+	unsigned int modelLocation, viewLocation, projectionLocation, textureLocation, sunDirLoc, camPosLoc;
+	GLint highlightModelLoc, highlightViewLoc, highlightProjLoc, highlightColourLoc;
 	unsigned int sunViewLoc, sunProjLoc ,sunColourLoc, sunSunDirLoc, sunCamPosLoc;
 	glm::vec3 mainLightPos = glm::vec3(0, 20, 10);
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light;
@@ -78,29 +80,30 @@ private:
 	unsigned int sunVBO, sunVAO, sunEBO;
 	Shader* shader;
 	Shader* sunShader;
+	Shader* highlightShader;//plain coloured lines for the block outline
 	GLuint texAtlas;
 
 	//chunk stuff
-	//map to track async tasks for each chunk by its position. 
-	std::unordered_map<glm::vec3, std::future<MeshData>, Vec3Hash> chunkMeshFutures;  
-	std::unordered_map<uint64_t, std::future<void>> chunkGenerationFutures; // For async chunk generation 
-	
-
-	bool isInitialLoading; // Flag to track initial loading phase 
-	int currentLoadingRadius; // Current radius for loading chunks 
-	const int maxLoadingRadius; // Maximum radius (set to RENDER_DISTANCE) 
+	//async tasks for each chunk, keyed by chunk key
+	std::unordered_map<uint64_t, std::future<MeshData>> chunkMeshFutures;
+	std::unordered_map<uint64_t, std::future<Chunk>> chunkGenerationFutures; // For async chunk generation
 
 
+	bool isInitialLoading; // Flag to track initial loading phase
+	int currentLoadingRadius; // Current radius for loading chunks
+	const int maxLoadingRadius; // Maximum radius (set to RENDER_DISTANCE)
 
-	std::vector<glm::mat4> chunkModels;//array of chunk models
+
 	void updateChunks(const glm::vec3& playerPosition);
+	void unloadFarChunks(const glm::ivec3& playerChunkPos);
 	void generateChunkAsync(const glm::vec3& pos);
 	void tryApplyChunkGeneration();
+	void markNeighboursForRebuild(int chunkX, int chunkZ);
 	void drawChunks();
 	int seed = -1;
-	void updateChunkMeshAsync(Chunk& chunk);
-	void tryApplyChunkMeshUpdate(Chunk& chunk);
-	void processChunkMeshingInOrder();
+	void launchChunkMesh(uint64_t key, Chunk& chunk);
+	void processChunkMeshing();
+	void setWorldBlock(const glm::ivec3& worldPos, BlockType type);
 	
 
 	//fps tracking & timing
@@ -109,6 +112,7 @@ private:
 	float fps = 0.0f;          // Current FPS value
 	float deltaTime = 0.0f;	// Time between current frame and last frame
 	float lastFrame = 0.0f; // Time of last frame
+	float physicsAccumulator = 0.0f; // Frame time not yet used by a physics step
 
 
 	//building
@@ -128,10 +132,13 @@ private:
 	unsigned int depthMapFBO;
 	unsigned int depthMap;
 	Shader* depthShader;
-	static const int SHADOW_WIDTH = 4096*2;
-	static const int SHADOW_HEIGHT = 4096*2;
+	static const int SHADOW_WIDTH = 4096;
+	static const int SHADOW_HEIGHT = 4096;
+	static constexpr float SHADOW_RADIUS = 100.0f;//half width of the shadowed area around the player
+	static constexpr float SHADOW_LIGHT_DISTANCE = 250.0f;//how far towards the sun the shadow camera sits
 	glm::mat4 lightSpaceMatrix;
-	unsigned int lightSpaceLoc, shadowMapLoc;
+	GLint lightSpaceLoc, depthModelLoc;//depth shader
+	GLint shadowMapLoc, mainLightSpaceLoc;//main shader
 
 	//noise for world gen
 	void initNoise();

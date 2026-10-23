@@ -53,7 +53,7 @@ void main()
 
     //Unpack and transform the normal.
     vec3 n = unpackNormal(aPackedNormal);
-    Normal = mat3(transpose(inverse(model))) * n;
+    Normal = n; // model is only ever a translation, so normals are unchanged
 
 
     // Unpack color.

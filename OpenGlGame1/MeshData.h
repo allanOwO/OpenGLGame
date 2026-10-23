@@ -1,13 +1,25 @@
 #pragma once
-#include <map>
 #include <vector>
 #include "BlockType.h"
 #include "VertexPacking.h"
 
 
 struct MeshData {
-	//by type so can apply textures in batches
-	std::map<BlockType, std::vector<PackedVertex>> packedVerticesByType;
-	std::map<BlockType, std::vector<unsigned int>> indicesByType;
-	std::map<BlockType, unsigned int> baseIndicesByType;
+	//whole chunk in one buffer, all block types share the texture atlas so it's 1 draw call
+	std::vector<PackedVertex> vertices;
+	std::vector<unsigned int> indices;
+	int tallestBlock = 0;//highest non air block, for frustum culling
+};
+
+//copy of a chunk's blocks plus a 1 block border from its neighbours
+//mesh threads only read this, so the real chunks can be edited or unloaded while meshing
+struct ChunkMeshInput {
+	static constexpr int paddedSize = 18;//chunkSize + 1 each side
+	std::vector<BlockType> blocks;//paddedSize * paddedSize * height, x/z run from -1 to chunkSize
+	int maxY = -1;//highest non air block in the chunk itself, -1 if empty
+
+	//x and z are chunk local, so -1 and chunkSize are the neighbour border
+	BlockType get(int x, int y, int z) const {
+		return blocks[(static_cast<size_t>(y) * paddedSize + (z + 1)) * paddedSize + (x + 1)];
+	}
 };

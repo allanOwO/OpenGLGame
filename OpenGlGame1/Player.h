@@ -28,6 +28,7 @@ public:
 	
 	void spawn(glm::vec3 spawnPos); 
 	void update(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks);
+	void interpolate(float alpha);//0-1 between the previous and current physics step, sets the camera position
 
 	// Getters for rendering
 	glm::vec3 getCameraPos() const { return cameraPos; }
@@ -60,6 +61,7 @@ private:
 
 	//movement
 	glm::vec3 bodyPos;
+	glm::vec3 previousBodyPos = glm::vec3(0.0f);//body position at the previous physics step
 	float eyeLevel = 1.6f;
 	glm::vec3 velocity = glm::vec3(0.0f, 0.0f, 0.0f); // Player velocity
 	

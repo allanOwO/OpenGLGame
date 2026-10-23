@@ -10,11 +10,14 @@
 #include <random>
 #include <memory>
 #include <unordered_set>
+#include <limits>
 
 #define CHUNK_SIZE 16
 #define RENDER_DISTANCE 16
+#define UNLOAD_MARGIN 2 // extra chunks kept past render distance before unloading
 #define SUN_TILT glm::radians(70.0f)
 #define SUN_SPEED 0.1f
+#define PHYSICS_STEP (1.0f / 120.0f) // seconds per physics update
 
 FastNoiseLite Main::noiseGen;
 //std::unordered_map<glm::ivec2, float, IVec2Hash> Main::noiseCache; 
@@ -29,9 +32,18 @@ Main::Main() : window(nullptr),width(1280),height(720),player(nullptr)
 
 Main::~Main() {
     player.reset();
+
+    // Wait for worker threads, then free GL objects while the context still exists
+    chunkGenerationFutures.clear();
+    chunkMeshFutures.clear();
+    chunks.clear();
+    delete shader;
+    delete sunShader;
+    delete depthShader;
+    delete highlightShader;
+
     glfwDestroyWindow(window);
     glfwTerminate();
-    delete depthShader;
 }
 
 std::string Main::loadShader(const char* filepath) {
@@ -162,6 +174,15 @@ float Main::getBiomeNoise(float x, float z) const{
     
 }
 
+/// How much of each biome applies, smoothstep keeps the blend continuous so there are no cliffs at biome edges
+static float hillsWeight(float biomeValue) { return glm::smoothstep(0.25f, 0.45f, biomeValue); }
+static float mountainsWeight(float biomeValue) { return glm::smoothstep(0.55f, 0.75f, biomeValue); }
+
+// pow that keeps the sign, so values under "flatness" curve down instead of mirroring back up
+static float signedPow(float value, float exponent) {
+    return value < 0.0f ? -pow(-value, exponent) : pow(value, exponent);
+}
+
 //takes 0 to 1 noise value and assigns height in y
 float Main::remapHeight(float noiseValue, float biomeValue) const {
     float minHeight = 32.0f;  // Base height
@@ -176,44 +197,45 @@ float Main::remapHeight(float noiseValue, float biomeValue) const {
     auto hillsHeight = [](float nv) {
         float flatness = 0.5f;
         float steepness = 2.0f;
-        return flatness + (1.0f - flatness) * pow((nv - flatness) / (1.0f - flatness), steepness);
+        return flatness + (1.0f - flatness) * signedPow((nv - flatness) / (1.0f - flatness), steepness);
         };
 
     auto mountainsHeight = [](float nv) {
         float flatness = 0.3f; // Less flat area for mountains
         float steepness = 3.0f; // Steeper slopes
-        return flatness + (1.0f - flatness) * pow((nv - flatness) / (1.0f - flatness), steepness);
+        return flatness + (1.0f - flatness) * signedPow((nv - flatness) / (1.0f - flatness), steepness);
         };
 
-    // Interpolate between biomes based on biomeValue
-    float height;
-    if (biomeValue < 0.3f) {
-        height = plainsHeight(noiseValue); // Pure plains
-    }
-    else if (biomeValue < 0.6f) {
-        // Blend plains and hills
-        float t = (biomeValue - 0.3f) / 0.4f; // Transition factor (0 to 1)
-        height = (1.0f - t) * plainsHeight(noiseValue) + t * hillsHeight(noiseValue);
-    }
-    else {
-        // Blend hills and mountains
-        float t = (biomeValue - 0.7f) / 0.3f; // Transition factor (0 to 1)
-        height = (1.0f - t) * hillsHeight(noiseValue) + t * mountainsHeight(noiseValue);
+    // Blend plains -> hills -> mountains
+    float hills = hillsWeight(biomeValue);
+    float mountains = mountainsWeight(biomeValue);
+    float height = glm::mix(plainsHeight(noiseValue), hillsHeight(noiseValue), hills);
+    height = glm::mix(height, mountainsHeight(noiseValue), mountains);
+
+    // Scale height based on biome, mountains top out just under the chunk height
+    float mountainScale = (Chunk::chunkHeight - 1 - minHeight) / maxHeight;
+    float scale = glm::mix(0.2f, 0.8f, hills);
+    scale = glm::mix(scale, mountainScale, mountains);
+
+    float finalHeight = minHeight + height * (maxHeight * scale);
+    return glm::clamp(finalHeight, 0.0f, static_cast<float>(Chunk::chunkHeight - 1));
+}
+
+// Layered noise (fractal brownian motion) normalised to 0-1
+static float fbm(const FastNoiseLite& noise, float x, float z, float frequency, float persistence, int octaves) {
+    float height = 0.0f;
+    float amplitude = 0.9f;
+    float lacunarity = 2.0f;
+    float totalAmplitude = 0.0f;
+
+    for (int i = 0; i < octaves; i++) {
+        height += noise.GetNoise(x * frequency, z * frequency) * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= persistence;
+        frequency *= lacunarity;
     }
 
-    // Scale height based on biome
-    float scale;
-    if (biomeValue < 0.3f) {
-        scale = 0.2f; // Low height for plains
-    }
-    else if (biomeValue < 0.6f) {
-        scale = 0.8f; // Moderate height for hills
-    }
-    else {
-        scale = 2.0f; // Full height for mountains
-    }
-
-    return minHeight + height * (maxHeight * scale);
+    return (height + totalAmplitude) / (2.0f * totalAmplitude);
 }
 
 // Updated getWarpedHeight for more variation
@@ -224,31 +246,18 @@ float Main::getWarpedHeight(float x, float z, float biomeValue) const{
     float warpedX = x + warpX;
     float warpedZ = z + warpZ;
 
-    float height = 0.0f;
-    float amplitude = 0.9f; // Increased base amplitude for more variation
-    float frequency = (biomeValue > 0.7f) ? 0.08f : 0.3f; // Lower frequency for mountains
-    float lacunarity = 2.0f;
-    float persistence = (biomeValue >= 0.7f) ? 0.7f : 0.6f; // Higher persistence for more detail 
-    int octaves = (biomeValue > 0.7f) ? 5 : 4; //jaggedness
-    float totalAmplitude = 0.0f;
-
-    for (int i = 0; i < octaves; i++) {
-        float sample = Main::noiseGen.GetNoise(warpedX * frequency, warpedZ * frequency);
-        height += sample * amplitude;
-        totalAmplitude += amplitude;
-        amplitude *= persistence;
-        frequency *= lacunarity;
+    // Mountains use lower frequency, more octaves (jaggedness) and exaggerated peaks
+    // Both are worked out and blended in the transition so the terrain doesn't jump
+    float mountains = mountainsWeight(biomeValue);
+    float lowland = 0.0f, highland = 0.0f;
+    if (mountains < 1.0f) {
+        lowland = fbm(noiseGen, warpedX, warpedZ, 0.3f, 0.6f, 4);
+    }
+    if (mountains > 0.0f) {
+        highland = pow(fbm(noiseGen, warpedX, warpedZ, 0.08f, 0.7f, 5), 0.6f);
     }
 
-    // Normalize to 0-1
-    height = (height + totalAmplitude) / (2.0f * totalAmplitude);
-
-    // Amplify peaks in mountain regions
-    if (biomeValue >= 0.7f) {
-        height = pow(height, 0.6f); // Exaggerates peaks; adjust exponent as needed
-    }
-
-    return height;
+    return glm::mix(lowland, highland, mountains);
 }
 
 void Main::createShadowMap() {
@@ -317,6 +326,12 @@ void Main::createShaders() {
     shader = new Shader(getResourcePath("vertex_shader.glsl").c_str(), getResourcePath("fragment_shader.glsl").c_str());
     sunShader = new Shader(getResourcePath("sunVertex.glsl").c_str(), getResourcePath("sunFragment.glsl").c_str());
     depthShader = new Shader(getResourcePath("depth_vertex.glsl").c_str(), getResourcePath("depth_fragment.glsl").c_str());
+    highlightShader = new Shader(getResourcePath("highlight_vertex.glsl").c_str(), getResourcePath("highlight_fragment.glsl").c_str());
+
+    highlightModelLoc = glGetUniformLocation(highlightShader->ID, "model");
+    highlightViewLoc = glGetUniformLocation(highlightShader->ID, "view");
+    highlightProjLoc = glGetUniformLocation(highlightShader->ID, "projection");
+    highlightColourLoc = glGetUniformLocation(highlightShader->ID, "colour");
 
     if (sunShader->ID == 0) {
         std::cerr << "Sun shader failed to compile/link" << std::endl;
@@ -328,19 +343,16 @@ void Main::createShaders() {
     viewLocation = glGetUniformLocation(shader->ID, "view");
     projectionLocation = glGetUniformLocation(shader->ID, "projection");
     textureLocation = glGetUniformLocation(shader->ID, "ourTexture");
-    lightColourLoc = glGetUniformLocation(shader->ID, "lightColour");
-    lightPosLoc = glGetUniformLocation(shader->ID, "lightPos"); // New
     sunDirLoc = glGetUniformLocation(shader->ID, "sunDirection");
     camPosLoc = glGetUniformLocation(shader->ID, "cameraPos");
+    shadowMapLoc = glGetUniformLocation(shader->ID, "shadowMap");
+    mainLightSpaceLoc = glGetUniformLocation(shader->ID, "lightSpaceMatrix");
+
+    // Samplers never change unit, set once: atlas on 0, shadow map on 1
+    glUniform1i(textureLocation, 0);
+    glUniform1i(shadowMapLoc, 1);
 
     sunShader->use();
-
-    GLint currentProgram;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-    if (currentProgram != sunShader->ID) {
-        std::cerr << "Sun shader not active after use(). Expected: " << sunShader->ID << ", Got: " << currentProgram << std::endl;
-    }
-
     sunViewLoc = glGetUniformLocation(sunShader->ID, "view");
     sunProjLoc = glGetUniformLocation(sunShader->ID, "projection");
     sunSunDirLoc = glGetUniformLocation(sunShader->ID, "sunDirection");
@@ -349,17 +361,11 @@ void Main::createShaders() {
 
     depthShader->use();
     lightSpaceLoc = glGetUniformLocation(depthShader->ID, "lightSpaceMatrix");
-    shadowMapLoc = glGetUniformLocation(depthShader->ID, "shadowMap");
+    depthModelLoc = glGetUniformLocation(depthShader->ID, "model");
 
     if (lightSpaceLoc == -1) {
         std::cerr << "Uniform 'lightSpaceMatrix' not found in depth shader" << std::endl;
     }
-
-    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-    if (currentProgram != depthShader->ID) {
-        std::cerr << "deoth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
-    }
-
 }
 
 void Main::createHighlight() {
@@ -422,76 +428,50 @@ void Main::createSun() {
 }
 
 void Main::renderShadowMap() {
-    // Render depth map
-    while (glGetError() != GL_NO_ERROR) {}
-
+    // Render depth map from the sun's point of view
     glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-    GLenum err = glGetError(); 
-    if (err != GL_NO_ERROR) std::cerr << "Error after glViewport: " << err << std::endl;
-
     glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-    err = glGetError();
-    if (err != GL_NO_ERROR) std::cerr << "Error after glBindFramebuffer: " << err << std::endl;
-
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        std::cerr << "Framebuffer error: " << status << std::endl;
-        return;
-    }
-
     glDepthMask(GL_TRUE); // Ensure depth writes are enabled
     glClear(GL_DEPTH_BUFFER_BIT);
-    err = glGetError();
-    if (err != GL_NO_ERROR) std::cerr << "Error after glClear: " << err << std::endl;
+
     depthShader->use();
-
-    GLint currentProgram;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-    if (currentProgram != depthShader->ID) {
-        std::cerr << "depth shader not active after use(). Expected: " << depthShader->ID << ", Got: " << currentProgram << std::endl;
-    }
-
-    
-
     glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
-     err = glGetError();
-    if (err != GL_NO_ERROR) std::cerr << "Error after unifrm light mat loc: " << err << std::endl;
+
+    // Only chunks inside the light's box can cast shadows we see
+    Frustum lightFrustum;
+    lightFrustum.update(lightSpaceMatrix);
 
     //render chunks 1st pass to create shadows
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
     for (const auto& pair : chunks) {
         const Chunk& chunk = pair.second;
-        if (!chunk.isActive) continue;
+        if (!chunk.isActive || chunk.indexCount == 0) continue;
+
+        glm::vec3 min = chunk.chunkPosition;
+        glm::vec3 max = min + glm::vec3(CHUNK_SIZE, chunk.currentTallestBlock + 1, CHUNK_SIZE);
+        if (!lightFrustum.isBoxInFrustum(min, max)) continue;
 
         glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.chunkPosition);
-        glUniformMatrix4fv(glGetUniformLocation(depthShader->ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
-         err = glGetError();
-        if (err != GL_NO_ERROR) std::cerr << "Error after model loc: " << err << std::endl;
+        glUniformMatrix4fv(depthModelLoc, 1, GL_FALSE, glm::value_ptr(model));
         glBindVertexArray(chunk.VAO);
-         err = glGetError();
-        if (err != GL_NO_ERROR) std::cerr << "Error after bind vao shadow: " << err << std::endl;
-        for (const auto& typePair : chunk.indicesByType) {
-            const auto& indices = typePair.second;
-            if (indices.empty()) continue;
-            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
-                (void*)(chunk.baseIndicesByType.at(typePair.first) * sizeof(unsigned int)));
-        }
-        glBindVertexArray(0);
+        glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
     }
+    glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    //clear screen for main pass
-    glViewport(0, 0, width, height);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void Main::drawChunks() { 
     shader->use();
 
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Separate lock for rendering
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texAtlas);
+    glUniform1i(textureLocation, 0);
+
     for (const auto& pair : chunks) {
         
         const Chunk& chunk = pair.second;
+        if (!chunk.isActive || chunk.indexCount == 0)
+            continue;
+
         const glm::vec3& pos = chunk.chunkPosition;
 
         // Frustum culling 
@@ -500,28 +480,15 @@ void Main::drawChunks() {
         if (!frustum.isBoxInFrustum(min, max)) {
             continue; // Skip chunks outside the frustum 
         }
-        if (!chunk.isActive)
-            continue;
 
         glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
         glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
 
+        // whole chunk is one buffer, all blocks share the atlas
         glBindVertexArray(chunk.VAO);
-        for (const auto& typePair : chunk.verticesByType) {
-            BlockType type = typePair.first;
-            const auto& indices = chunk.indicesByType.at(type);
-
-            if (indices.empty()) continue;
-
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, texAtlas);
-            glUniform1i(textureLocation, 0);
-
-            glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT,
-                (void*)(chunk.baseIndicesByType.at(type) * sizeof(unsigned int)));
-        }
-        glBindVertexArray(0);
+        glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
     }
+    glBindVertexArray(0);
 }
 
 void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection) {
@@ -553,131 +520,116 @@ void Main::renderSun(const glm::mat4& view, const glm::mat4& projection, const g
 
 void Main::render() {
 
-    // set background & clear screen
-    glClearColor(0.1f, 0.4f, 0.6f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-
     //vie and projection matrices
     glm::mat4 view = player->getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, 1000.0f);
-     
+
     //whats in current view
-    glm::mat4 viewProj = projection * view; 
-    frustum.update(viewProj); // Update frustum for culling 
+    glm::mat4 viewProj = projection * view;
+    frustum.update(viewProj); // Update frustum for culling
 
     // Rotate sun direction based on time
     float time = glfwGetTime();
     float angle = time * SUN_SPEED;
     glm::vec3 sunDir = glm::normalize(glm::vec3(cos(angle), sin(angle) * sin(SUN_TILT), sin(angle) * cos(SUN_TILT))); // Compute sun direction using a circular motion
-    sunDirection = -sunDir; 
+    sunDirection = -sunDir;
 
     //shadow code, smaller area gives better shadows with same resolution
-    glm::vec3 playerPos = player->getCameraPos();  
-    glm::mat4 lightProjection = glm::ortho(-100.0f + playerPos.x, 100.0f + playerPos.x,
-        -100.0f + playerPos.z, 100.0f + playerPos.z, 
-        1.0f, 200.0f);
+    //shadow camera sits towards the sun and looks at the player, the box is centred on the player
+    glm::vec3 playerPos = player->getCameraPos();
+    glm::mat4 lightProjection = glm::ortho(-SHADOW_RADIUS, SHADOW_RADIUS, -SHADOW_RADIUS, SHADOW_RADIUS,
+        1.0f, SHADOW_LIGHT_DISTANCE * 2.0f);
+    glm::vec3 lightPos = playerPos + sunDir * SHADOW_LIGHT_DISTANCE;
+    glm::mat4 lightView = glm::lookAt(lightPos, playerPos, glm::vec3(0.0, 1.0, 0.0));
 
-    glm::vec3 lightPos = playerPos - normalize (sunDirection) * 50.0f; // Position sun far along its direction
-    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
+    // Snap the box to whole shadow map texels so shadow edges don't shimmer as the player moves
+    glm::mat4 shadowMatrix = lightProjection * lightView;
+    glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    float texelsPerUnit = SHADOW_WIDTH * 0.5f;
+    glm::vec2 snapOffset = (glm::round(glm::vec2(shadowOrigin) * texelsPerUnit) - glm::vec2(shadowOrigin) * texelsPerUnit) / texelsPerUnit;
+    lightProjection[3][0] += snapOffset.x;
+    lightProjection[3][1] += snapOffset.y;
     lightSpaceMatrix = lightProjection * lightView;
 
-    renderShadowMap();
+    // Below the horizon the shader ignores sunlight, so shadows wouldn't show anyway
+    bool sunUp = sunDir.y > -0.1f;
+    if (sunUp) {
+        renderShadowMap();
+    }
 
-    // Ensure default framebuffer and clear errors
+    // Back to the default framebuffer for the main pass
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, width, height);
+    glClearColor(0.1f, 0.4f, 0.6f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
     //use normal shader for cube + chunks
-    shader->use(); 
+    shader->use();
 
     // pass view and projection matrices to shader
     glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
     glUniform3fv(camPosLoc, 1, glm::value_ptr(player->getCameraPos()));
     glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection));
-    //glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
-    
-    
+    glUniformMatrix4fv(mainLightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
 
-    GLint shadowMapLoc = glGetUniformLocation(shader->ID, "shadowMap"); 
-    glUniform1i(shadowMapLoc, 1); 
-
-    GLint lightSpaceLoc = glGetUniformLocation(shader->ID, "lightSpaceMatrix");
-    glUniformMatrix4fv(lightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix)); 
-
-    // Bind shadow map to texture unit 1 (unit 0 is for texture atlas)
-    glActiveTexture(GL_TEXTURE1); 
-    glBindTexture(GL_TEXTURE_2D, depthMap); 
-
-    // Bind texture atlas to unit 0
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texAtlas);
-    glUniform1i(textureLocation, 0); 
+    // Bind shadow map to texture unit 1 (unit 0 is for texture atlas, bound in drawChunks)
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
 
     drawChunks();
 
     raycastBlock();//used to find currently faced blocl
     // Render highlight if a block is in range
     if (hasHighlightedBlock) {
-        shader->use();
-        glm::mat4 highlightModel = glm::mat4(1.0f);
+        highlightShader->use();
         // Center the highlight by adding (0.5, 0.5, 0.5) to the block position
-        highlightModel = glm::translate(highlightModel, highlightedBlockPos + glm::vec3(0.5f, 0.5f, 0.5f));
-        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(highlightModel));
-        glUniform4f(lightColourLoc, 1.0f, 1.0f, 0.0f, 1.0f); // Yellow highlight
+        glm::mat4 highlightModel = glm::translate(glm::mat4(1.0f), highlightedBlockPos + glm::vec3(0.5f, 0.5f, 0.5f));
+        glUniformMatrix4fv(highlightModelLoc, 1, GL_FALSE, glm::value_ptr(highlightModel));
+        glUniformMatrix4fv(highlightViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(highlightProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform4f(highlightColourLoc, 1.0f, 1.0f, 0.0f, 1.0f); // Yellow highlight
 
         glBindVertexArray(highlightVAO);
         glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0); // 24 indices for wireframe
         glBindVertexArray(0);
     }
 
-    renderSun(view,projection,-sunDirection); 
+    renderSun(view,projection,-sunDirection);
+}
+
+static int floorDiv(int a, int b) {
+    return static_cast<int>(std::floor(static_cast<float>(a) / b));
 }
 
 void Main::generateChunkAsync(const glm::vec3& pos) {
-    // Launch async task to generate the chunk
-
-    int chunkX = static_cast<int>(pos.x / CHUNK_SIZE);
-    int chunkZ = static_cast<int>(pos.z / CHUNK_SIZE);
+    // Launch async task to generate the chunk, the chunk is only added to the map on the main thread
+    int chunkX = static_cast<int>(floor(pos.x / CHUNK_SIZE));
+    int chunkZ = static_cast<int>(floor(pos.z / CHUNK_SIZE));
     uint64_t key = getChunkKey(chunkX, chunkZ);
 
-    chunkGenerationFutures[key] = std::async(std::launch::async, [this, pos,key]() {
-        Chunk chunk(pos, seed, this);
-        std::lock_guard<std::recursive_mutex> lock(chunksMutex); 
-        chunks.emplace(key, std::move(chunk)); // Store in chunks with the uint64_t key
-        }); 
+    chunkGenerationFutures[key] = std::async(std::launch::async, [this, pos]() {
+        return Chunk(pos, this);
+        });
 }
 
 void Main::tryApplyChunkGeneration() {
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
-    GLFWwindow* currentContext = glfwGetCurrentContext(); 
-    if (currentContext != window) {
-        std::cerr << "Context not current before chunk init! Current: " << currentContext << ", Expected: " << window << std::endl;
-        glfwMakeContextCurrent(window);
-    }
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        std::cerr << "Pending OpenGL error before chunk init: " << err << std::endl;
-    } 
     for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            
+
             uint64_t key = it->first; // The key is the uint64_t chunk identifier
-            auto chunkIt = chunks.find(key);
-            if (chunkIt != chunks.end()) {
-                Chunk& chunk = chunkIt->second;
+            auto inserted = chunks.emplace(key, it->second.get());
+            Chunk& chunk = inserted.first->second;
 
-                // Initialize buffers for rendering
-                chunk.initializeBuffers(); 
+            // Initialize buffers for rendering
+            chunk.initializeBuffers();
 
-                chunkModels.emplace_back(glm::translate(glm::mat4(1.0f), chunk.chunkPosition));
-            }
+            // Neighbours meshed without this chunk have faces on the shared border, rebuild them
+            markNeighboursForRebuild(chunkKeyX(key), chunkKeyZ(key));
 
             // Remove the completed future
-            it = chunkGenerationFutures.erase(it); 
-            
+            it = chunkGenerationFutures.erase(it);
         }
         else {
             ++it;
@@ -685,26 +637,34 @@ void Main::tryApplyChunkGeneration() {
     }
 }
 
+void Main::markNeighboursForRebuild(int chunkX, int chunkZ) {
+    const glm::ivec2 offsets[4] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+    for (const auto& offset : offsets) {
+        if (Chunk* neighbour = findChunk(chunkX + offset.x, chunkZ + offset.y)) {
+            neighbour->fullRebuildNeeded = true;
+        }
+    }
+}
+
 void Main::updateChunks(const glm::vec3& playerPosition) {
     // Calculate the player's chunk position in chunk coordinates
     glm::ivec3 playerChunkPos(
-        static_cast<int>(floor(playerPosition.x / CHUNK_SIZE)), 
+        static_cast<int>(floor(playerPosition.x / CHUNK_SIZE)),
         0, // Y is fixed at 0 for chunk coordinates
         static_cast<int>(floor(playerPosition.z / CHUNK_SIZE))
     );
-    uint64_t playerKey = getChunkKey(playerChunkPos.x, playerChunkPos.z); 
 
     // Store chunk positions and distances
     std::vector<std::pair<uint64_t, float>> chunkPositions;
     int effectiveRenderDistance = isInitialLoading ? currentLoadingRadius : RENDER_DISTANCE;
-    chunkPositions.reserve((2 * effectiveRenderDistance + 1) * (2 * effectiveRenderDistance + 1)); // Preallocate 
+    chunkPositions.reserve((2 * effectiveRenderDistance + 1) * (2 * effectiveRenderDistance + 1)); // Preallocate
 
     for (int x = -effectiveRenderDistance; x <= effectiveRenderDistance; x++) {
         for (int z = -effectiveRenderDistance; z <= effectiveRenderDistance; z++) {
             glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z); // Offset in chunk coordinates
-            uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);  
+            uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
             glm::vec3 realChunkPos = glm::vec3(chunkPos.x * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkPos.z * CHUNK_SIZE);
-            
+
             // Use Manhattan distance for faster sorting (no square root needed)
             float distance = std::abs(realChunkPos.x - playerPosition.x) + std::abs(realChunkPos.z - playerPosition.z);
             chunkPositions.emplace_back(key, distance);
@@ -721,35 +681,27 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
     loadedChunks.reserve(chunkPositions.size());//reduce rehashing
     int chunksGeneratedThisFrame = 0;
     const int maxChunksGeneratedPerFrame = isInitialLoading ? 2 : 1; // Load 2 chunks per frame during initial loading
-    
-    {
-        std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Lock here
-        for (const auto& pair : chunkPositions) {
-            loadedChunks.insert(pair.first);
-            if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) continue;
 
-            int chunkX = static_cast<int32_t>(pair.first >> 32); // Extract x
-            int chunkZ = static_cast<int32_t>(pair.first & 0xFFFFFFFF); // Extract z
-            glm::vec3 realChunkPos(chunkX * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkZ * CHUNK_SIZE);
+    for (const auto& pair : chunkPositions) {
+        loadedChunks.insert(pair.first);
+        if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) continue;
 
-            if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
-                generateChunkAsync(realChunkPos);
-                chunksGeneratedThisFrame++;
-            }
-        } 
+        glm::vec3 realChunkPos(chunkKeyX(pair.first) * CHUNK_SIZE, -Chunk::baseTerrainHeight, chunkKeyZ(pair.first) * CHUNK_SIZE);
+
+        if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
+            generateChunkAsync(realChunkPos);
+            chunksGeneratedThisFrame++;
+        }
     }
-    
 
     // Update the loading radius
     if (isInitialLoading) {
-        std::lock_guard<std::recursive_mutex> lock(chunksMutex);
         // Check if all chunks within the current radius are loaded
         int expectedChunks = (2 * currentLoadingRadius + 1) * (2 * currentLoadingRadius + 1);
         int loadedChunksCount = 0;
         for (const auto& pair : chunks) {
-            
-            int dx = std::abs(pair.second.chunkPosition.x / CHUNK_SIZE - playerChunkPos.x);
-            int dz = std::abs(pair.second.chunkPosition.z / CHUNK_SIZE - playerChunkPos.z);
+            int dx = std::abs(chunkKeyX(pair.first) - playerChunkPos.x);
+            int dz = std::abs(chunkKeyZ(pair.first) - playerChunkPos.z);
             if (dx <= currentLoadingRadius && dz <= currentLoadingRadius) {
                 loadedChunksCount++;
             }
@@ -764,25 +716,72 @@ void Main::updateChunks(const glm::vec3& playerPosition) {
     }
 
     // Mark chunks as active/inactive
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex);
     for (auto& pair : chunks) {
-        if (loadedChunks.find(pair.first) == loadedChunks.end()) {
-            pair.second.isActive = false;
+        pair.second.isActive = loadedChunks.find(pair.first) != loadedChunks.end();
+    }
+
+    unloadFarChunks(playerChunkPos);
+}
+
+void Main::unloadFarChunks(const glm::ivec3& playerChunkPos) {
+    // Margin stops chunks on the edge being unloaded and reloaded when walking back and forth
+    const int unloadDistance = RENDER_DISTANCE + UNLOAD_MARGIN;
+    for (auto it = chunks.begin(); it != chunks.end();) {
+        int dx = std::abs(chunkKeyX(it->first) - playerChunkPos.x);
+        int dz = std::abs(chunkKeyZ(it->first) - playerChunkPos.z);
+        if (dx > unloadDistance || dz > unloadDistance) {
+            // Any mesh job still running for it only has a copy, its result is dropped when it finishes
+            it = chunks.erase(it);
         }
         else {
-            pair.second.isActive = true;
+            ++it;
         }
     }
 }
 
 Chunk* Main::getChunk(const glm::vec3& pos) {
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Keep this for external access
+    return findChunk(static_cast<int>(floor(pos.x / CHUNK_SIZE)), static_cast<int>(floor(pos.z / CHUNK_SIZE)));
+}
 
-    uint64_t key = getChunkKey(static_cast<int>(floor(pos.x / CHUNK_SIZE)), static_cast<int>(floor(pos.z / CHUNK_SIZE)));
-    // Look up the chunk
-    auto it = chunks.find(key);
+Chunk* Main::findChunk(int chunkX, int chunkZ) {
+    auto it = chunks.find(getChunkKey(chunkX, chunkZ));
     return (it != chunks.end()) ? &it->second : nullptr;
-} 
+}
+
+BlockType Main::getWorldBlock(const glm::ivec3& worldPos) {
+    int localY = worldPos.y + Chunk::baseTerrainHeight;
+    if (localY < 0 || localY >= Chunk::chunkHeight) return BlockType::AIR;
+
+    int chunkX = floorDiv(worldPos.x, CHUNK_SIZE);
+    int chunkZ = floorDiv(worldPos.z, CHUNK_SIZE);
+    Chunk* chunk = findChunk(chunkX, chunkZ);
+    if (!chunk) return BlockType::AIR;
+
+    return chunk->getBlock(worldPos.x - chunkX * CHUNK_SIZE, localY, worldPos.z - chunkZ * CHUNK_SIZE);
+}
+
+void Main::setWorldBlock(const glm::ivec3& worldPos, BlockType type) {
+    int localY = worldPos.y + Chunk::baseTerrainHeight;
+    if (localY < 0 || localY >= Chunk::chunkHeight) return;
+
+    int chunkX = floorDiv(worldPos.x, CHUNK_SIZE);
+    int chunkZ = floorDiv(worldPos.z, CHUNK_SIZE);
+    Chunk* chunk = findChunk(chunkX, chunkZ);
+    if (!chunk) return;
+
+    int localX = worldPos.x - chunkX * CHUNK_SIZE;
+    int localZ = worldPos.z - chunkZ * CHUNK_SIZE;
+    chunk->setBlock(localX, localY, localZ, type);
+
+    // Blocks on the edge change the neighbour's visible faces too
+    auto rebuild = [this](int x, int z) {
+        if (Chunk* neighbour = findChunk(x, z)) neighbour->fullRebuildNeeded = true;
+    };
+    if (localX == 0) rebuild(chunkX - 1, chunkZ);
+    if (localX == CHUNK_SIZE - 1) rebuild(chunkX + 1, chunkZ);
+    if (localZ == 0) rebuild(chunkX, chunkZ - 1);
+    if (localZ == CHUNK_SIZE - 1) rebuild(chunkX, chunkZ + 1);
+}
 
 
 
@@ -853,234 +852,124 @@ void Main::doFps() {
  
 
 void Main::raycastBlock() {
-    hasHighlightedBlock = false; 
+    // Voxel traversal (Amanatides & Woo), visits every block the ray passes through in order
+    hasHighlightedBlock = false;
     glm::vec3 rayOrigin = player->getCameraPos();
     glm::vec3 rayDir = glm::normalize(player->getCameraFront());
+
+    glm::ivec3 block = glm::ivec3(glm::floor(rayOrigin));
+    glm::ivec3 step(0);
+    glm::vec3 tMax(std::numeric_limits<float>::infinity());//ray distance to the next block boundary on each axis
+    glm::vec3 tDelta(std::numeric_limits<float>::infinity());//ray distance to cross one whole block on each axis
+
+    for (int i = 0; i < 3; i++) {
+        if (rayDir[i] > 0.0f) {
+            step[i] = 1;
+            tMax[i] = (block[i] + 1.0f - rayOrigin[i]) / rayDir[i];
+            tDelta[i] = 1.0f / rayDir[i];
+        }
+        else if (rayDir[i] < 0.0f) {
+            step[i] = -1;
+            tMax[i] = (rayOrigin[i] - block[i]) / -rayDir[i];
+            tDelta[i] = -1.0f / rayDir[i];
+        }
+    }
+
+    glm::ivec3 previous = block;
     float t = 0.0f;
-    float step = 0.1f;
-
-    for (t = 0.0f; t < reachDistance; t += step) {
-        glm::vec3 currentPos = rayOrigin + rayDir * t;
-
-        // Calculate the chunk position (assuming chunks are keyed at multiples of chunkSize in X and Z)
-        glm::vec3 chunkPos = glm::floor(currentPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
-        chunkPos.y = -Chunk::baseTerrainHeight; // Set to the fixed Y-position of chunks (adjust as needed)
-
-        // Look up the chunk in the map
-        uint64_t key = getChunkKey(chunkPos.x / CHUNK_SIZE, chunkPos.z / CHUNK_SIZE); 
-        Chunk* chunk = nullptr;
-        { 
-            std::lock_guard<std::recursive_mutex> lock(chunksMutex);
-            auto it = chunks.find(key);
-            if (it != chunks.end()) {
-                chunk = &it->second;
-            }
+    while (t <= reachDistance) {
+        if (getWorldBlock(block) != BlockType::AIR) {
+            highlightedBlockPos = glm::vec3(block);
+            prevBlock = glm::vec3(previous);//always shares a face with the hit block
+            hasHighlightedBlock = true;
+            return;
         }
 
-        if (chunk) { // Process chunk outside the lock to minimize lock duration
-            int localX = static_cast<int>(currentPos.x - chunk->chunkPosition.x);
-            int localY = static_cast<int>(currentPos.y - chunk->chunkPosition.y);
-            int localZ = static_cast<int>(currentPos.z - chunk->chunkPosition.z);
-
-            if (localX >= 0 && localX < Chunk::chunkSize &&
-                localY >= 0 && localY < Chunk::chunkHeight &&
-                localZ >= 0 && localZ < Chunk::chunkSize) {
-
-                size_t index = chunk->getBlockIndex(localX, localY, localZ);
-                if (chunk->blocks[index] != BlockType::AIR) { // Fixed typo
-                    highlightedBlockPos = glm::vec3(floor(currentPos.x), floor(currentPos.y), floor(currentPos.z));
-                    hasHighlightedBlock = true;
-                    glm::vec3 prevPos = rayOrigin + rayDir * (t - step);
-                    prevBlock = glm::vec3(floor(prevPos.x), floor(prevPos.y), floor(prevPos.z));
-                    return;
-                }
-            }
-        }
+        // Step along whichever axis reaches its next boundary first
+        int axis = (tMax.x < tMax.y) ? ((tMax.x < tMax.z) ? 0 : 2) : ((tMax.y < tMax.z) ? 1 : 2);
+        previous = block;
+        t = tMax[axis];
+        block[axis] += step[axis];
+        tMax[axis] += tDelta[axis];
     }
 }
 
 void Main::placeBlock() {
 
     if (hasHighlightedBlock) {
-        glm::vec3 placePos = prevBlock; // Place block on the face indicated by the normal    
+        glm::vec3 placePos = prevBlock; // Empty block next to the hit face
 
         if (player->blockIntersects(placePos)) {
             return; // Cancel placement if a player is in the way
-        }   
-       
-        glm::vec3 chunkPos = glm::floor(placePos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
-        chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
-
-        uint64_t key = getChunkKey(chunkPos.x/ CHUNK_SIZE, chunkPos.z/ CHUNK_SIZE);
-        // Look up the chunk
-        auto it = chunks.find(key);
-        if (it != chunks.end()) {
-            Chunk& chunk = it->second;
-
-            // Calculate local coordinates within the chunk
-            int localX = static_cast<int>(placePos.x - chunkPos.x);
-            int localY = static_cast<int>(placePos.y - chunkPos.y);
-            int localZ = static_cast<int>(placePos.z - chunkPos.z);
-
-            // Check if the local coordinates are within chunk bounds
-            if (localX >= 0 && localX < Chunk::chunkSize &&
-                localY >= 0 && localY < Chunk::chunkHeight &&
-                localZ >= 0 && localZ < Chunk::chunkSize) {
-
-                // Directly set the block at the calculated local position
-                chunk.setBlock(localX, localY, localZ, BlockType::STONE);
-            }
         }
+
+        setWorldBlock(glm::ivec3(placePos), BlockType::STONE);
     }
 }
 
-void Main::breakBlock() { 
+void Main::breakBlock() {
     if (hasHighlightedBlock) {
-
-
-        glm::vec3 chunkPos = glm::floor(highlightedBlockPos / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
-        chunkPos.y = -Chunk::baseTerrainHeight; // Adjust if your chunks have a fixed Y
-
-        uint64_t key = getChunkKey(chunkPos.x/CHUNK_SIZE, chunkPos.z/ CHUNK_SIZE);
-        // Look up the chunk
-        auto it = chunks.find(key);;
-        if (it != chunks.end()) {
-            Chunk& chunk = it->second;
-            // Calculate local coordinates
-            int localX = static_cast<int>(highlightedBlockPos.x - chunkPos.x);
-            int localY = static_cast<int>(highlightedBlockPos.y - chunkPos.y);
-            int localZ = static_cast<int>(highlightedBlockPos.z - chunkPos.z);
-
-            // Check bounds and break the block
-            if (localX >= 0 && localX < Chunk::chunkSize &&
-                localY >= 0 && localY < Chunk::chunkHeight &&
-                localZ >= 0 && localZ < Chunk::chunkSize) {
-                chunk.setBlock(localX, localY, localZ, BlockType::AIR);
-            }
-        } 
+        setWorldBlock(glm::ivec3(highlightedBlockPos), BlockType::AIR);
     }
 }
 
-// Launch an asynchronous mesh update for a chunk.
-void Main::updateChunkMeshAsync(Chunk& chunk) { 
+// Copy the chunk and its neighbour borders, then build the mesh on a worker thread
+void Main::launchChunkMesh(uint64_t key, Chunk& chunk) {
+    int chunkX = chunkKeyX(key);
+    int chunkZ = chunkKeyZ(key);
+    const Chunk* neighbours[4] = {
+        findChunk(chunkX + 1, chunkZ), // +X
+        findChunk(chunkX - 1, chunkZ), // -X
+        findChunk(chunkX, chunkZ + 1), // +Z
+        findChunk(chunkX, chunkZ - 1)  // -Z
+    };
 
+    ChunkMeshInput input = chunk.makeMeshInput(neighbours);
+    // Cleared before the job runs, so edits made while it runs queue another rebuild
+    chunk.fullRebuildNeeded = false;
 
-    if (chunk.fullRebuildNeeded && chunk.isActive && activeAsyncTasks < MAX_ASYNC_TASKS()) {
-        // Launch an async task that calls generateMeshData.
-        chunkMeshFutures[chunk.chunkPosition] = std::async(std::launch::async, [&chunk]() {
-            return chunk.generateMeshData();
-            });
-        // Reset the flags on the chunk so we don’t launch it again until needed.
-        chunk.fullRebuildNeeded = false;
-        activeAsyncTasks++; 
-    }
+    chunkMeshFutures[key] = std::async(std::launch::async, [input = std::move(input)]() {
+        return Chunk::buildMesh(input);
+        });
 }
 
-// Check if an asynchronous mesh update for the given chunk is ready,and if so, update its OpenGL buffers.
-void Main::tryApplyChunkMeshUpdate(Chunk& chunk) {
-    auto it = chunkMeshFutures.find(chunk.chunkPosition);
-    if (it != chunkMeshFutures.end()) {
-        if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-
-            MeshData newMesh = it->second.get();
-            chunkMeshFutures.erase(it);
-            activeAsyncTasks--;
-
-            chunk.verticesByType = std::move(newMesh.packedVerticesByType);
-            chunk.indicesByType = std::move(newMesh.indicesByType);
-            chunk.baseIndicesByType = std::move(newMesh.baseIndicesByType);
-
-            std::vector<PackedVertex> allVertices;
-            std::vector<unsigned int> allIndices;
-            unsigned int vertexOffset = 0;
-            unsigned int indexOffset = 0;
-            for (auto& pair : chunk.verticesByType) {
-                BlockType type = pair.first;
-                chunk.baseIndicesByType[type] = indexOffset;
-                allVertices.insert(allVertices.end(), pair.second.begin(), pair.second.end());
-                for (unsigned int idx : chunk.indicesByType[type]) {
-                    allIndices.push_back(idx + vertexOffset);
-                }
-                vertexOffset += pair.second.size();
-                indexOffset += chunk.indicesByType[type].size();
-            }
-
-            // Check if buffers are valid
-            if (chunk.VAO == 0 || chunk.VBO == 0 || chunk.EBO == 0) {
-                std::lock_guard<std::mutex> lock(logMutex);
-                std::cerr << "Invalid VAO/VBO/EBO for chunk " << glm::to_string(chunk.chunkPosition) << std::endl;
-                return;
-            }
-
-            glBindVertexArray(chunk.VAO);
-            glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
-
-
-            glBufferData(GL_ARRAY_BUFFER, allVertices.size() * sizeof(PackedVertex), allVertices.data(), GL_DYNAMIC_DRAW);
-
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk.EBO);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, allIndices.size() * sizeof(unsigned int), allIndices.data(), GL_DYNAMIC_DRAW);
-
-
-            
-            glVertexAttribIPointer(0, 3, GL_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, pos)); 
-            glVertexAttribIPointer(1, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, colour)); 
-            glVertexAttribIPointer(2, 2, GL_UNSIGNED_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, tex)); 
-            glVertexAttribIPointer(3, 1, GL_INT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, normal)); 
-
-            glEnableVertexAttribArray(0);
-            glEnableVertexAttribArray(1);
-            glEnableVertexAttribArray(2);
-            glEnableVertexAttribArray(3);
-             
-
-            glBindVertexArray(0);
-
-
-            chunk.fullRebuildNeeded = false;                        
+void Main::processChunkMeshing() {
+    // Upload finished meshes
+    for (auto it = chunkMeshFutures.begin(); it != chunkMeshFutures.end();) {
+        if (it->second.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+            ++it;
+            continue;
         }
-    }
-}
 
-
-void Main::processChunkMeshingInOrder() {
-
-    std::lock_guard<std::recursive_mutex> lock(chunksMutex); // Single lock for all chunk operations
-    int processedChunks = 0;
-    const int maxChunksPerFrame = 20;//needs to be >1 as 1 is always used for current chunk
-
-    //pos in chunks (eg 0,0,1)
-    glm::ivec3 playerChunkPos = glm::ivec3(
-        floor(player->getCameraPos().x / CHUNK_SIZE),
-        0, // Y is fixed at 0 for chunk coordinates
-        floor(player->getCameraPos().z / CHUNK_SIZE)
-    );
-
-    uint64_t key = getChunkKey(playerChunkPos.x, playerChunkPos.z);
-    // Look up the chunk
-    auto playerChunkIt = chunks.find(key);
-     
-    if (playerChunkIt != chunks.end() && processedChunks < maxChunksPerFrame) { 
-        Chunk& playerChunk = playerChunkIt->second; 
-        if (playerChunk.isActive) { 
-            if (playerChunk.fullRebuildNeeded) {  
-                updateChunkMeshAsync(playerChunk); 
-            } 
-            tryApplyChunkMeshUpdate(playerChunk);
-            processedChunks++;
-        }
+        MeshData mesh = it->second.get();
+        if (Chunk* chunk = findChunk(chunkKeyX(it->first), chunkKeyZ(it->first))) {
+            chunk->uploadMesh(mesh);
+        }// else the chunk was unloaded while meshing
+        it = chunkMeshFutures.erase(it);
     }
 
+    if (chunkMeshFutures.size() >= MAX_ASYNC_TASKS()) return;
+    size_t freeSlots = MAX_ASYNC_TASKS() - chunkMeshFutures.size();
+
+    // Chunks waiting for a mesh, closest to the player first
+    glm::vec3 playerPos = player->getCameraPos();
+    std::vector<std::pair<float, uint64_t>> waiting;
     for (auto& pair : chunks) {
-        if (processedChunks >= maxChunksPerFrame) break;
-        Chunk& chunk = pair.second;
-        if (chunk.isActive) {
-            if (chunk.fullRebuildNeeded) {
-                updateChunkMeshAsync(chunk);
-            }
-            tryApplyChunkMeshUpdate(chunk); 
-        }
-    }  
+        const Chunk& chunk = pair.second;
+        if (!chunk.isActive || !chunk.fullRebuildNeeded) continue;
+        if (chunkMeshFutures.find(pair.first) != chunkMeshFutures.end()) continue;//one job per chunk at a time
+
+        float dx = chunk.chunkPosition.x + CHUNK_SIZE * 0.5f - playerPos.x;
+        float dz = chunk.chunkPosition.z + CHUNK_SIZE * 0.5f - playerPos.z;
+        waiting.emplace_back(dx * dx + dz * dz, pair.first);
+    }
+
+    size_t launchCount = std::min(freeSlots, waiting.size());
+    std::partial_sort(waiting.begin(), waiting.begin() + launchCount, waiting.end());
+    for (size_t i = 0; i < launchCount; i++) {
+        uint64_t key = waiting[i].second;
+        launchChunkMesh(key, chunks.at(key));
+    }
 }
 
 void Main::run() {
@@ -1105,21 +994,37 @@ void Main::run() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        // Cap deltaTime to prevent large spikes
-        const float maxDeltaTime = 1.0f / 60.0f;
+        // Cap deltaTime so a long stall (window drag, breakpoint) doesn't run hundreds of physics steps
+        const float maxDeltaTime = 0.25f;
         if (deltaTime > maxDeltaTime) {
             deltaTime = maxDeltaTime;
         }
-         
+
         updateChunks(player->getCameraPos());
         tryApplyChunkGeneration();
-        player->update(deltaTime, chunks); 
-        processInput(window); 
 
-        processChunkMeshingInOrder(); 
+        // Physics runs in fixed steps so movement is the same at any frame rate
+        physicsAccumulator += deltaTime;
+        while (physicsAccumulator >= PHYSICS_STEP) {
+            player->update(PHYSICS_STEP, chunks);
+            physicsAccumulator -= PHYSICS_STEP;
+        }
+        // Camera blends between the last two steps so it stays smooth above the physics rate
+        player->interpolate(physicsAccumulator / PHYSICS_STEP);
+
+        processInput(window);
+
+        processChunkMeshing();
 
         render();
         doFps();
+
+#ifdef _DEBUG
+        // One check per frame, glGetError after every call stalls the GPU
+        for (GLenum err; (err = glGetError()) != GL_NO_ERROR;) {
+            std::cerr << "OpenGL error this frame: 0x" << std::hex << err << std::dec << std::endl;
+        }
+#endif
 
         glfwSwapBuffers(window);
         glfwPollEvents();

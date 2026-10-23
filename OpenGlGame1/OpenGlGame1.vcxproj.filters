@@ -73,39 +73,33 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="vertex_shader.glsl">
+    <None Include="..\ResourceFiles\vertex_shader.glsl">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="fragment_shader.glsl">
+    <None Include="..\ResourceFiles\highlight_vertex.glsl">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="depth_fragment.glsl">
+    <None Include="..\ResourceFiles\highlight_fragment.glsl">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="depth_vertex.glsl">
+    <None Include="..\ResourceFiles\fragment_shader.glsl">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="sunFragment.glsl">
+    <None Include="..\ResourceFiles\depth_fragment.glsl">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="sunVertex.glsl">
+    <None Include="..\ResourceFiles\depth_vertex.glsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\ResourceFiles\sunFragment.glsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\ResourceFiles\sunVertex.glsl">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\ResourceFiles\container.jpg">
-      <Filter>Resource Files</Filter>
-    </Image>
     <Image Include="..\ResourceFiles\textureAtlas.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="..\ResourceFiles\dirt.jpg">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="..\ResourceFiles\grass.jpg">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="..\ResourceFiles\stone.jpg">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

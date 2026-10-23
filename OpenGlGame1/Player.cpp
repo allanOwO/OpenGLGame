@@ -24,12 +24,18 @@ Player::Player(GLFWwindow* window,Main* main)
 
 void Player::spawn(glm::vec3 spawnPos) {
     bodyPos = spawnPos;
+    previousBodyPos = spawnPos;
     cameraPos = bodyPos + glm::vec3(0, eyeLevel, 0);
 }
 
 void Player::update(float deltaTime, const std::unordered_map<uint64_t, Chunk>& chunks) {
 
+    previousBodyPos = bodyPos;
     playerMovement(deltaTime, chunks);
+}
+
+void Player::interpolate(float alpha) {
+    cameraPos = glm::mix(previousBodyPos, bodyPos, alpha) + glm::vec3(0.0f, eyeLevel, 0.0f);
 }
 
 //handles looking
@@ -93,8 +99,10 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, 
         velocity.z = moveDir.z * camSpeed;
     }
     else {
-        velocity.x *= 0.9f; // Friction
-        velocity.z *= 0.9f;
+        // Friction, keeps 90% of speed every 1/60s regardless of step size
+        float friction = pow(0.9f, deltaTime * 60.0f);
+        velocity.x *= friction;
+        velocity.z *= friction;
     }
 
     // Jump logic 
@@ -116,8 +124,6 @@ void Player::playerMovement(float deltaTime, const std::unordered_map<uint64_t, 
     // Gather nearby chunks based on playerBox boundaries
     std::unordered_map<uint64_t, const Chunk*> nearbyChunks;
     {
-        std::lock_guard<std::recursive_mutex> lock(main->chunksMutex);
-
         // Determine chunk bounds playerBox spans
         glm::vec3 minChunkPos = glm::floor(playerBox.min / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);
         glm::vec3 maxChunkPos = glm::floor(playerBox.max / glm::vec3(Chunk::chunkSize, 1, Chunk::chunkSize)) * glm::vec3(Chunk::chunkSize, 0, Chunk::chunkSize);

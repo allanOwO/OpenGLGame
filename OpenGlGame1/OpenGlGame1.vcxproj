@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -110,9 +110,13 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(ProjectDir)..\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /y /i /e /q /d "$(ProjectDir)..\ResourceFiles" "$(OutDir)ResourceFiles\"</Command>
+      <Message>Copy ResourceFiles next to the exe</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -122,7 +126,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\Allan\Documents\OpenGLGame\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -130,9 +134,13 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\Allan\Documents\OpenGLGame\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /y /i /e /q /d "$(ProjectDir)..\ResourceFiles" "$(OutDir)ResourceFiles\"</Command>
+      <Message>Copy ResourceFiles next to the exe</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="BlockConstants.cpp" />
@@ -156,18 +164,16 @@
     <ClInclude Include="VertexPacking.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="depth_fragment.glsl" />
-    <None Include="depth_vertex.glsl" />
-    <None Include="fragment_shader.glsl" />
-    <None Include="sunFragment.glsl" />
-    <None Include="sunVertex.glsl" />
-    <None Include="vertex_shader.glsl" />
+    <None Include="..\ResourceFiles\depth_fragment.glsl" />
+    <None Include="..\ResourceFiles\depth_vertex.glsl" />
+    <None Include="..\ResourceFiles\fragment_shader.glsl" />
+    <None Include="..\ResourceFiles\sunFragment.glsl" />
+    <None Include="..\ResourceFiles\sunVertex.glsl" />
+    <None Include="..\ResourceFiles\vertex_shader.glsl" />
+    <None Include="..\ResourceFiles\highlight_vertex.glsl" />
+    <None Include="..\ResourceFiles\highlight_fragment.glsl" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\ResourceFiles\container.jpg" />
-    <Image Include="..\ResourceFiles\dirt.jpg" />
-    <Image Include="..\ResourceFiles\grass.jpg" />
-    <Image Include="..\ResourceFiles\stone.jpg" />
     <Image Include="..\ResourceFiles\textureAtlas.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
