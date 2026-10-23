@@ -139,7 +139,7 @@ void World::tryApplyChunkGeneration() {
             // Initialize buffers for rendering
             chunk.initializeBuffers();
 
-            // Neighbours meshed without this chunk have faces on the shared border, rebuild them
+            // Neighbours meshed without this chunk have faces and ambient occlusion on the shared border, rebuild them
             markNeighboursForRebuild(chunkKeyX(key), chunkKeyZ(key));
 
             // Remove the completed future
@@ -152,10 +152,13 @@ void World::tryApplyChunkGeneration() {
 }
 
 void World::markNeighboursForRebuild(int chunkX, int chunkZ) {
-    const glm::ivec2 offsets[4] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
-    for (const auto& offset : offsets) {
-        if (Chunk* neighbour = findChunk(chunkX + offset.x, chunkZ + offset.y)) {
-            neighbour->fullRebuildNeeded = true;
+    // All 8 surrounding chunks, diagonal ones use this chunk's corner column for ambient occlusion
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dz == 0) continue;
+            if (Chunk* neighbour = findChunk(chunkX + dx, chunkZ + dz)) {
+                neighbour->fullRebuildNeeded = true;
+            }
         }
     }
 }
@@ -186,11 +189,15 @@ void World::unloadFarChunks(const glm::ivec3& playerChunkPos) {
 void World::launchChunkMesh(uint64_t key, Chunk& chunk) {
     int chunkX = chunkKeyX(key);
     int chunkZ = chunkKeyZ(key);
-    const Chunk* neighbours[4] = {
+    const Chunk* neighbours[8] = {
         findChunk(chunkX + 1, chunkZ), // +X
         findChunk(chunkX - 1, chunkZ), // -X
         findChunk(chunkX, chunkZ + 1), // +Z
-        findChunk(chunkX, chunkZ - 1)  // -Z
+        findChunk(chunkX, chunkZ - 1), // -Z
+        findChunk(chunkX + 1, chunkZ + 1), // +X+Z
+        findChunk(chunkX + 1, chunkZ - 1), // +X-Z
+        findChunk(chunkX - 1, chunkZ + 1), // -X+Z
+        findChunk(chunkX - 1, chunkZ - 1)  // -X-Z
     };
 
     ChunkMeshInput input = chunk.makeMeshInput(neighbours);
@@ -277,14 +284,15 @@ void World::setBlock(const glm::ivec3& worldPos, BlockType type) {
     int localZ = worldPos.z - chunkZ * Chunk::chunkSize;
     chunk->setBlock(localX, localY, localZ, type);
 
-    // Blocks on the edge change the neighbour's visible faces too
+    // Blocks on the edge change the neighbour's visible faces and ambient occlusion too
     auto rebuild = [this](int x, int z) {
         if (Chunk* neighbour = findChunk(x, z)) neighbour->fullRebuildNeeded = true;
     };
-    if (localX == 0) rebuild(chunkX - 1, chunkZ);
-    if (localX == Chunk::chunkSize - 1) rebuild(chunkX + 1, chunkZ);
-    if (localZ == 0) rebuild(chunkX, chunkZ - 1);
-    if (localZ == Chunk::chunkSize - 1) rebuild(chunkX, chunkZ + 1);
+    int edgeX = (localX == 0) ? -1 : (localX == Chunk::chunkSize - 1) ? 1 : 0;
+    int edgeZ = (localZ == 0) ? -1 : (localZ == Chunk::chunkSize - 1) ? 1 : 0;
+    if (edgeX != 0) rebuild(chunkX + edgeX, chunkZ);
+    if (edgeZ != 0) rebuild(chunkX, chunkZ + edgeZ);
+    if (edgeX != 0 && edgeZ != 0) rebuild(chunkX + edgeX, chunkZ + edgeZ);//corner block, diagonal chunk's AO
 }
 
 bool World::raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit) const {

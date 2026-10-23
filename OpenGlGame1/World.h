@@ -20,7 +20,7 @@ struct RaycastHit {
 class World
 {
 public:
-	static constexpr int renderDistance = 32;//in chunks
+	static constexpr int renderDistance = 64;//in chunks
 	static constexpr int unloadMargin = 2;//extra chunks kept past render distance before unloading
 
 	explicit World(int seed);

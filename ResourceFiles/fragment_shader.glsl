@@ -1,8 +1,9 @@
 #version 330 core 
 out vec4 FragColor;
 
-in vec4 objectColour;
-in vec2 TexCoord;
+in float AO;
+in vec2 TexCoord;//in blocks
+flat in vec2 TileOrigin;
 in vec3 FragPos;
 in vec3 Normal;
 in vec4 FragPosLightSpace;
@@ -14,6 +15,8 @@ uniform sampler2D ourTexture;
 uniform sampler2D shadowMap;
 uniform vec3 cameraPos;
 
+const float tileSize = 1.0 / 4.0;//one tile of the 4x4 atlas
+
 vec3 sunsetColour();
 float ShadowCalc(vec4 FragPosLightSpace);
 
@@ -24,13 +27,12 @@ void main()
     vec3 specular = vec3(0,0,0);
 
     
-    //ambient occlusion, darkens side faces, keeps tops light
-    float ao = clamp((Normal.y + 1.0) * 0.5, 0.0, 1.0);  // Range 0..1    
-    float aoFactor = mix(0.5, 1.0, ao);
+    //face shading, darkens side faces, keeps tops light
+    float faceShade = mix(0.5, 1.0, clamp((Normal.y + 1.0) * 0.5, 0.0, 1.0));
 
     //ambient
     float ambientStrength = 0.3;
-    vec3 ambient = ambientStrength * sunColour * aoFactor;
+    vec3 ambient = ambientStrength * sunColour * faceShade;
 
     //directional
     vec3 norm = normalize(Normal);
@@ -57,10 +59,14 @@ void main()
     // Combine lighting with shadow
     vec3 lighting = (ambient + (1.0 - shadow) * (diffuse + specular));
 
-    // Combine lighting with object color and texture
-    vec3 result = lighting * objectColour.rgb * texture(ourTexture, TexCoord).rgb;
+    // Repeat the block's atlas tile once per block across greedy merged faces
+    vec2 atlasUV = TileOrigin + fract(TexCoord) * tileSize;
+    vec4 texColour = texture(ourTexture, atlasUV);
 
-    FragColor = vec4(result, objectColour.a * texture(ourTexture, TexCoord).a);
+    // Combine lighting with ambient occlusion and texture
+    vec3 result = lighting * AO * texColour.rgb;
+
+    FragColor = vec4(result, texColour.a);
     //FragColor = texture(ourTexture, TexCoord);//no lighting
 
 }

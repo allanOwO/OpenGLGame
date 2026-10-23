@@ -37,9 +37,10 @@ public:
 	size_t getBlockIndex(int x, int y, int z) const;
 
 	//copies this chunk + neighbour borders so the mesh can be built on another thread
-	//neighbours are +X, -X, +Z, -Z, nullptr if not loaded (treated as air)
-	ChunkMeshInput makeMeshInput(const Chunk* const neighbours[4]) const;
-	static MeshData buildMesh(const ChunkMeshInput& input);
+	//neighbours are +X, -X, +Z, -Z, then the diagonals +X+Z, +X-Z, -X+Z, -X-Z (ambient occlusion needs the corners)
+	//nullptr if not loaded (treated as air)
+	ChunkMeshInput makeMeshInput(const Chunk* const neighbours[8]) const;
+	static MeshData buildMesh(const ChunkMeshInput& input);//greedy meshing with ambient occlusion
 
 	void initializeBuffers(); // create VAO/VBO/EBO, main thread only
 	void uploadMesh(const MeshData& mesh); // main thread only
@@ -54,6 +55,5 @@ public:
 
 private:
 	void releaseBuffers();
-	static void addFace(MeshData& mesh, const glm::ivec3& blockPos, int face, BlockType type);
 };
 

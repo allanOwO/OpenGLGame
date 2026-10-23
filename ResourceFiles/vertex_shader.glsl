@@ -1,11 +1,14 @@
 #version 330 core
+// Must match PackedVertex in VertexPacking.h and the attribute setup in Chunk::initializeBuffers
 layout (location = 0) in ivec3 aPos;
-layout (location = 1) in uint aPackedColour;
-layout (location = 2) in uvec2 aTexCoord;
-layout (location = 3) in int aPackedNormal;
+layout (location = 1) in uint aNormal;    // face index 0-5 (Front, Back, Left, Right, Top, Bottom)
+layout (location = 2) in uint aAO;        // 0 = darkest corner, 3 = no occlusion
+layout (location = 3) in uvec2 aTexCoord; // in blocks, the tile repeats every 1.0
+layout (location = 4) in uint aTile;      // atlas tile index
 
-out vec4 objectColour;//colour to go to frag shader, must be same name
-out vec2 TexCoord;
+out float AO;//corner brightness, blended across the face by the GPU
+out vec2 TexCoord;//in blocks
+flat out vec2 TileOrigin;//flat = same for the whole face, no blending
 out vec3 FragPos;//world space pos
 out vec3 Normal;//normal vector
 out vec4 FragPosLightSpace;//output the shadwos
@@ -13,36 +16,19 @@ out vec4 FragPosLightSpace;//output the shadwos
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 lightSpaceMatrix; 
+uniform mat4 lightSpaceMatrix;
 
-// Unpack the color from a 32-bit unsigned integer.
-vec4 unpackColor(uint packedColour)
-{
-    // Assuming the format is: lowest 8 bits = r, next = g, next = b, highest 8 bits = a.
-    float r = float((packedColour >> 0)  & 0xFFu) / 255.0;
-    float g = float((packedColour >> 8)  & 0xFFu) / 255.0;
-    float b = float((packedColour >> 16) & 0xFFu) / 255.0;
-    float a = float((packedColour >> 24) & 0xFFu) / 255.0;
-    return vec4(r, g, b, a);
-}
+const vec3 faceNormals[6] = vec3[6](
+    vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0),
+    vec3(-1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0),
+    vec3(0.0, 1.0, 0.0), vec3(0.0, -1.0, 0.0)
+);
 
-vec3 unpackNormal(int packedNormal)
-{
-    uint data = uint(packedNormal);
+// Brightness for each AO level, the gaps between them set how strong the effect looks
+const float aoBrightness[4] = float[4](0.45, 0.65, 0.82, 1.0);
 
-    // Extract 10-bit signed components in the correct order (x, y, z)
-    int x = int(data & 0x3FFu);         // Extract bits 0-9 (x)
-    int y = int((data >> 10) & 0x3FFu); // Extract bits 10-19 (y)
-    int z = int((data >> 20) & 0x3FFu); // Extract bits 20-29 (z)
-
-    // Convert from 10-bit signed values to normalized float (-1 to 1)
-    vec3 normal;
-    normal.x = (x >= 512) ? float(x - 1024) / 511.0 : float(x) / 511.0;
-    normal.y = (y >= 512) ? float(y - 1024) / 511.0 : float(y) / 511.0;
-    normal.z = (z >= 512) ? float(z - 1024) / 511.0 : float(z) / 511.0;
-
-    return normalize(normal); // Normalize to ensure unit length
-}
+// Atlas is atlasTiles x atlasTiles, must match atlasTiles in BlockConstants.h
+const uint atlasTiles = 4u;
 
 void main()
 {
@@ -51,15 +37,11 @@ void main()
     gl_Position = projection * view * model * vec4(pos, 1.0);
     FragPos = vec3(model * vec4(pos, 1.0)); // World-space position
 
-    //Unpack and transform the normal.
-    vec3 n = unpackNormal(aPackedNormal);
-    Normal = n; // model is only ever a translation, so normals are unchanged
+    Normal = faceNormals[int(aNormal)]; // model is only ever a translation, so normals are unchanged
+    AO = aoBrightness[int(aAO)];
 
+    TexCoord = vec2(aTexCoord);
+    TileOrigin = vec2(float(aTile % atlasTiles), float(aTile / atlasTiles)) / float(atlasTiles);
 
-    // Unpack color.
-    objectColour = unpackColor(aPackedColour);
-
-    //Unpack texture coordinates from the 16-bit range [0, 65535] to [0, 1].
-    TexCoord = vec2(aTexCoord)/ 65535.0;
     FragPosLightSpace = lightSpaceMatrix * vec4(FragPos,1.0);
 }
