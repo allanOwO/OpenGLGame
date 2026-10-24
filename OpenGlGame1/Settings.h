@@ -6,7 +6,7 @@
 // Old files without the new key just keep the default, so nothing breaks
 struct Settings {
 	static constexpr int minRenderDistance = 4;
-	static constexpr int maxRenderDistance = 64;
+	static constexpr int maxRenderDistance = 200;
 
 	// Graphics
 	int renderDistance = 16;//in chunks
