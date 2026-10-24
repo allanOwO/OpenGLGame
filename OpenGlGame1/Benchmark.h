@@ -43,6 +43,10 @@ public:
 
 	std::string status() const;//"FLIGHT 12.0 / 20.0 S", shown while it runs
 
+	// A file name when this frame should be saved as a screenshot (call after the world is drawn, before the HUD)
+	// Same camera spots every run, so screenshots from different versions can be compared side by side
+	std::string screenshotPath();
+
 	// Call once finished, writes the result files and returns the summary to show on screen
 	std::vector<std::string> finish();
 
@@ -52,7 +56,7 @@ private:
 	// Everything measured during one phase
 	struct PhaseRecord {
 		std::vector<float> frameMs;
-		double updateMs = 0.0, renderMs = 0.0, gpuMs = 0.0;
+		double updateMs = 0.0, renderMs = 0.0, gpuMs = 0.0, gpuShadowMs = 0.0;
 		int64_t triangles = 0, drawCalls = 0;
 		double seconds = 0.0;
 		JobTotals generationStart, meshStart, editStart;//world timers when the phase began
@@ -88,6 +92,8 @@ private:
 
 	int renderDistance;
 	int screenWidth, screenHeight;
+	std::string runName;//benchmark_<start time>, shared by the report and screenshots
+	int screenshotsTaken = 0;
 	WorldStats finalStats;
 	RenderStats lastRender;
 };

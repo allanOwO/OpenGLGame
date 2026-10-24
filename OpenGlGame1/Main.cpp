@@ -1,4 +1,6 @@
 #include "Main.h"
+#include "GLFunctions.h"
+#include "Screenshot.h"
 #include <iostream>
 #include <random>
 #include <string>
@@ -110,8 +112,8 @@ void Main::init() {
         exit(-1);
     }
 
-    // Set OpenGL version to 3.3 Core Profile
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    // OpenGL 4.3 Core Profile, 4.3 is the first version with glMultiDrawElementsIndirect (all chunks in one draw call)
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
@@ -119,7 +121,7 @@ void Main::init() {
     // Create a window
     window = glfwCreateWindow(width, height, "OpenGL Window", NULL, NULL);
     if (!window) {
-        std::cerr << "Failed to create GLFW window!" << std::endl;
+        std::cerr << "Failed to create GLFW window! (needs a GPU and driver with OpenGL 4.3)" << std::endl;
         glfwTerminate();
         exit(-1);
     }
@@ -131,6 +133,10 @@ void Main::init() {
     // Initialize GLAD
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "Failed to initialize GLAD!" << std::endl;
+        exit(-1);
+    }
+    if (!GLFunctions::load((GLADloadproc)glfwGetProcAddress)) {
+        std::cerr << "Driver is missing OpenGL 4.3 functions!" << std::endl;
         exit(-1);
     }
 
@@ -462,6 +468,7 @@ void Main::run() {
         lastFrameStart = frameStart;
         lastFrameTimes.frameMs = static_cast<float>(frameSeconds * 1000.0);
         lastFrameTimes.gpuMs = renderer->getGpuMs();
+        lastFrameTimes.gpuShadowMs = renderer->getGpuShadowMs();
         if (world) {
             debugOverlay.recordFrame(lastFrameTimes);
             if (benchmark) benchmark->recordFrame(lastFrameTimes, renderer->getStats());
@@ -531,6 +538,12 @@ void Main::run() {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
         lastFrameTimes.renderMs = static_cast<float>((nowSeconds() - renderStart) * 1000.0);
+
+        // Before the HUD is drawn, so the screenshot is just the world
+        if (benchmark) {
+            std::string path = benchmark->screenshotPath();
+            if (!path.empty() && !saveScreenshot(path, width, height)) std::cerr << "Couldn't save " << path << std::endl;
+        }
 
         // UI on top
         if (menu.isOpen()) {

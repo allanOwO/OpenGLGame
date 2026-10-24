@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include <iostream>
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #define STB_IMAGE_IMPLEMENTATION  // This tells stb to include the implementation
@@ -17,7 +18,6 @@ Renderer::Renderer() {
     loadTextures();
     createShaders();
     createHighlight();
-    glGenQueries(GPU_QUERY_COUNT, gpuQueries);
 }
 
 Renderer::~Renderer() {
@@ -31,7 +31,6 @@ Renderer::~Renderer() {
     glDeleteTextures(1, &texAtlas);
     glDeleteTextures(1, &depthMap);
     glDeleteFramebuffers(1, &depthMapFBO);
-    glDeleteQueries(GPU_QUERY_COUNT, gpuQueries);
 }
 
 // ---------- setup ----------
@@ -43,7 +42,6 @@ void Renderer::createShaders() {
     highlightShader = std::make_unique<Shader>(getResourcePath("highlight_vertex.glsl").c_str(), getResourcePath("highlight_fragment.glsl").c_str());
 
     shader->use();
-    modelLocation = glGetUniformLocation(shader->ID, "model");
     viewLocation = glGetUniformLocation(shader->ID, "view");
     projectionLocation = glGetUniformLocation(shader->ID, "projection");
     textureLocation = glGetUniformLocation(shader->ID, "ourTexture");
@@ -63,7 +61,6 @@ void Renderer::createShaders() {
     sunCamPosLoc = glGetUniformLocation(sunShader->ID, "camPos");
 
     lightSpaceLoc = glGetUniformLocation(depthShader->ID, "lightSpaceMatrix");
-    depthModelLoc = glGetUniformLocation(depthShader->ID, "model");
     if (lightSpaceLoc == -1) {
         std::cerr << "Uniform 'lightSpaceMatrix' not found in depth shader" << std::endl;
     }
@@ -199,20 +196,6 @@ void Renderer::createHighlight() {
 void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
     int width, int height, float time, float farPlane, const RaycastHit* highlight) {
 
-    // The query being reused was started GPU_QUERY_COUNT frames ago, read it if the GPU has finished it
-    GLuint query = gpuQueries[gpuQueryIndex];
-    if (gpuQueryStarted[gpuQueryIndex]) {
-        GLint available = 0;
-        glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
-        if (available) {
-            GLuint64 nanoseconds = 0;
-            glGetQueryObjectui64v(query, GL_QUERY_RESULT, &nanoseconds);
-            gpuMs = static_cast<float>(nanoseconds / 1'000'000.0);
-        }
-    }
-    glBeginQuery(GL_TIME_ELAPSED, query);
-    gpuQueryStarted[gpuQueryIndex] = true;
-    gpuQueryIndex = (gpuQueryIndex + 1) % GPU_QUERY_COUNT;
 
     stats = RenderStats();
 
@@ -246,8 +229,14 @@ void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm:
     // Below the horizon the shader ignores sunlight, so shadows wouldn't show anyway
     bool sunUp = sunDir.y > -0.1f;
     if (sunUp) {
+        shadowTimer.begin();
         renderShadowMap(world);
+        shadowTimer.end();
     }
+    else {
+        shadowTimer.skip();
+    }
+    mainTimer.begin();
 
     // Back to the default framebuffer for the main pass
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -269,14 +258,14 @@ void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm:
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, depthMap);
 
-    drawChunks(world);
+    drawChunks(world, cameraPos);
 
     if (highlight) {
         drawHighlight(*highlight, view, projection);
     }
 
     renderSun(view, projection, -sunDirection, cameraPos);
-    glEndQuery(GL_TIME_ELAPSED);
+    mainTimer.end();
 }
 
 void Renderer::renderShadowMap(const World& world) {
@@ -293,36 +282,38 @@ void Renderer::renderShadowMap(const World& world) {
     Frustum lightFrustum;
     lightFrustum.update(lightSpaceMatrix);
 
-    //render chunks 1st pass to create shadows
+    //render chunks 1st pass to create shadows, depth only so the order doesn't matter
+    visibleChunks.clear();
     for (const auto& pair : world.getChunks()) {
         const Chunk& chunk = pair.second;
-        if (!chunk.isActive || chunk.indexCount == 0) continue;
+        if (!chunk.isActive || chunk.indexCount() == 0) continue;
 
         glm::vec3 min = chunk.chunkPosition;
         glm::vec3 max = min + glm::vec3(Chunk::chunkSize, chunk.currentTallestBlock + 1, Chunk::chunkSize);
         if (!lightFrustum.isBoxInFrustum(min, max)) continue;
-
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.chunkPosition);
-        glUniformMatrix4fv(depthModelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        glBindVertexArray(chunk.VAO);
-        glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
-        stats.shadowDrawCalls++;
-        stats.shadowTriangles += chunk.indexCount / 3;
+        visibleChunks.emplace_back(0.0f, &chunk);
+        stats.shadowTriangles += chunk.indexCount() / 3;
     }
+    drawList(world);
+    if (!visibleChunks.empty()) stats.shadowDrawCalls++;
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Renderer::drawChunks(const World& world) {
+void Renderer::drawChunks(const World& world, const glm::vec3& cameraPos) {
     shader->use();
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texAtlas);
 
+    // Find what's in view first, then draw nearest first
+    // Near chunks fill the depth buffer, so pixels of far chunks hidden behind them fail the depth test
+    // before the fragment shader runs, instead of being lit and shadowed and then drawn over
+    visibleChunks.clear();
     for (const auto& pair : world.getChunks()) {
 
         const Chunk& chunk = pair.second;
-        if (!chunk.isActive || chunk.indexCount == 0)
+        if (!chunk.isActive || chunk.indexCount() == 0)
             continue;
 
         const glm::vec3& pos = chunk.chunkPosition;
@@ -335,17 +326,41 @@ void Renderer::drawChunks(const World& world) {
             continue; // Skip chunks outside the frustum
         }
 
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
-        glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-
-        // whole chunk is one buffer, all blocks share the atlas
-        glBindVertexArray(chunk.VAO);
-        glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
+        // Horizontal distance to the chunk centre is enough to order columns
+        float dx = pos.x + Chunk::chunkSize * 0.5f - cameraPos.x;
+        float dz = pos.z + Chunk::chunkSize * 0.5f - cameraPos.z;
+        visibleChunks.emplace_back(dx * dx + dz * dz, &chunk);
         stats.chunksDrawn++;
-        stats.drawCalls++;
-        stats.triangles += chunk.indexCount / 3;
+        stats.triangles += chunk.indexCount() / 3;
     }
+    std::sort(visibleChunks.begin(), visibleChunks.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    drawList(world);
+    if (!visibleChunks.empty()) stats.drawCalls++;
     glBindVertexArray(0);
+}
+
+void Renderer::drawList(const World& world) {
+    // One command per chunk: which vertices (baseVertex) and which origin (baseInstance)
+    // The GPU runs through the whole list from a single call, instead of the CPU issuing a draw per chunk
+    drawCommands.clear();
+    drawOrigins.clear();
+    for (const auto& entry : visibleChunks) {
+        const Chunk& chunk = *entry.second;
+        DrawCommand command;
+        command.count = static_cast<GLuint>(chunk.indexCount());
+        command.instanceCount = 1;
+        command.firstIndex = 0;
+        command.baseVertex = chunk.mesh.firstVertex;
+        command.baseInstance = static_cast<GLuint>(drawCommands.size());
+        drawCommands.push_back(command);
+        drawOrigins.push_back(chunk.chunkPosition);
+    }
+
+    const ChunkMeshPool& pool = world.getMeshPool();
+    pool.bindForDrawing();
+    pool.draw(drawCommands, drawOrigins);
 }
 
 void Renderer::drawHighlight(const RaycastHit& highlight, const glm::mat4& view, const glm::mat4& projection) {

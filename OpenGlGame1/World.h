@@ -1,5 +1,7 @@
 #pragma once
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <future>
 #include <string>
 #include <glm/glm.hpp>
@@ -10,6 +12,7 @@
 #include "TerrainGenerator.h"
 #include "ChunkStorage.h"
 #include "DebugStats.h"
+#include "ChunkMeshPool.h"
 
 // Result of World::raycast
 struct RaycastHit {
@@ -19,6 +22,7 @@ struct RaycastHit {
 
 // Owns every chunk: loading, unloading, generation and meshing jobs, and block access in world coordinates
 // Only the main thread calls into World, worker threads get copies of what they need
+// Needs a GL context for its lifetime (the mesh pool)
 class World
 {
 public:
@@ -40,6 +44,7 @@ public:
 
 	const std::unordered_map<uint64_t, Chunk>& getChunks() const { return chunks; }
 	const TerrainGenerator& getTerrain() const { return terrain; }
+	const ChunkMeshPool& getMeshPool() const { return meshPool; }
 	int getSeed() const { return terrain.getSeed(); }
 
 	void setRenderDistance(int chunks);//can change while playing, chunks load/unload to match
@@ -62,7 +67,10 @@ private:
 	const Chunk* findChunk(int chunkX, int chunkZ) const;
 
 	// loading
-	void updateLoading(const glm::ivec3& playerChunkPos, const glm::vec3& playerPosition);
+	void rebuildLoadOrder();//call when render distance changes
+	void updateLoading(const glm::ivec3& playerChunkPos);
+	void updateActiveChunks();//uses lastPlayerChunk
+	bool isInRange(uint64_t key) const;//within render distance of the player's chunk
 	void unloadFarChunks(const glm::ivec3& playerChunkPos);
 	void generateChunkAsync(int chunkX, int chunkZ);
 	void tryApplyChunkGeneration(bool waitForAll = false);
@@ -71,11 +79,15 @@ private:
 	// meshing
 	void processChunkMeshing(const glm::vec3& playerPosition);
 	void launchChunkMesh(uint64_t key, Chunk& chunk);
+	void requestMesh(uint64_t key);//chunk's mesh is out of date, rebuild it when a worker is free
 
 	TerrainGenerator terrain;
 
 	// Modified chunks that are currently unloaded, a world is its seed + these + the modified chunks still loaded
 	ChunkStorage storage;
+
+	// Every chunk's mesh, chunks only hold their range in it
+	ChunkMeshPool meshPool;
 
 	//only touched on the main thread, worker threads get copies (see ChunkMeshInput)
 	std::unordered_map<uint64_t, Chunk> chunks;
@@ -97,5 +109,16 @@ private:
 
 	int renderDistance;//in chunks
 	bool isInitialLoading = true; // Flag to track initial loading phase
-	int currentLoadingRadius = 0; // Current radius for loading chunks, grows to renderDistance
+
+	// Offsets (in chunks) from the player's chunk to every chunk in render distance, nearest first
+	// Sorted once when render distance changes, instead of sorting thousands of positions every frame
+	std::vector<glm::ivec2> loadOrder;
+	// Everything in loadOrder before this index is loaded or generating, so each frame carries on from here
+	// Back to 0 whenever the player enters another chunk, once the whole list is done loading costs nothing
+	size_t loadCursor = 0;
+	glm::ivec3 lastPlayerChunk = glm::ivec3(0);
+	bool areaChanged = true;//player chunk or render distance changed since active/unload were last worked out
+
+	// Chunks whose mesh is out of date, so meshing doesn't have to look through every loaded chunk each frame
+	std::unordered_set<uint64_t> meshQueue;
 };

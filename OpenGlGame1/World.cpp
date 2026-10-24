@@ -16,11 +16,13 @@ static int floorDiv(int a, int b) {
 }
 
 World::World(int seed, int renderDistance) : terrain(seed), renderDistance(renderDistance) {
+    rebuildLoadOrder();
 }
 
 void World::setRenderDistance(int chunks) {
+    if (chunks == renderDistance) return;
     renderDistance = chunks;
-    if (isInitialLoading) currentLoadingRadius = std::min(currentLoadingRadius, renderDistance);
+    rebuildLoadOrder();
 }
 
 bool World::isLoadedAt(const glm::vec3& worldPos) const {
@@ -30,9 +32,11 @@ bool World::isLoadedAt(const glm::vec3& worldPos) const {
 }
 
 bool World::isFullyLoaded() const {
-    if (isInitialLoading || !chunkGenerationFutures.empty() || !chunkMeshFutures.empty()) return false;
-    for (const auto& pair : chunks) {
-        if (pair.second.isActive && pair.second.fullRebuildNeeded) return false;
+    if (isInitialLoading || loadCursor < loadOrder.size()) return false;
+    if (!chunkGenerationFutures.empty() || !chunkMeshFutures.empty()) return false;
+    for (uint64_t key : meshQueue) {
+        const Chunk* chunk = findChunk(chunkKeyX(key), chunkKeyZ(key));
+        if (chunk && chunk->isActive && chunk->fullRebuildNeeded) return false;
     }
     return true;
 }
@@ -49,8 +53,8 @@ WorldStats World::getStats() const {
         const Chunk& chunk = pair.second;
         if (chunk.isActive) stats.chunksActive++;
         stats.blockBytes += chunk.blocks.capacity() * sizeof(BlockType);
-        stats.meshBytes += chunk.meshBytes;
     }
+    stats.meshBytes = meshPool.usedBytes();
     return stats;
 }
 
@@ -91,76 +95,71 @@ void World::update(const glm::vec3& playerPosition) {
         static_cast<int>(floor(playerPosition.z / Chunk::chunkSize))
     );
 
-    updateLoading(playerChunkPos, playerPosition);
-    tryApplyChunkGeneration();
-    unloadFarChunks(playerChunkPos);
+    // Chunks only enter or leave render distance when the player crosses into another chunk,
+    // so the work that looks at every chunk only runs then, not every frame
+    if (areaChanged || playerChunkPos != lastPlayerChunk) {
+        lastPlayerChunk = playerChunkPos;
+        areaChanged = false;
+        loadCursor = 0;//new chunks may be missing anywhere in range now
+        updateActiveChunks();
+        unloadFarChunks(playerChunkPos);
+    }
+
+    tryApplyChunkGeneration();//first, so its finished jobs free up workers for updateLoading
+    updateLoading(playerChunkPos);
     processChunkMeshing(playerPosition);
 }
 
 // ---------- loading ----------
 
-void World::updateLoading(const glm::ivec3& playerChunkPos, const glm::vec3& playerPosition) {
-    // Store chunk positions and distances
-    std::vector<std::pair<uint64_t, float>> chunkPositions;
-    int effectiveRenderDistance = isInitialLoading ? currentLoadingRadius : renderDistance;
-    chunkPositions.reserve((2 * effectiveRenderDistance + 1) * (2 * effectiveRenderDistance + 1)); // Preallocate
-
-    for (int x = -effectiveRenderDistance; x <= effectiveRenderDistance; x++) {
-        for (int z = -effectiveRenderDistance; z <= effectiveRenderDistance; z++) {
-            glm::ivec3 chunkPos = playerChunkPos + glm::ivec3(x, 0, z); // Offset in chunk coordinates
-            uint64_t key = getChunkKey(chunkPos.x, chunkPos.z);
-
-            // Use Manhattan distance for faster sorting (no square root needed)
-            float distance = std::abs(chunkPos.x * Chunk::chunkSize - playerPosition.x) + std::abs(chunkPos.z * Chunk::chunkSize - playerPosition.z);
-            chunkPositions.emplace_back(key, distance);
+void World::rebuildLoadOrder() {
+    loadOrder.clear();
+    loadOrder.reserve(static_cast<size_t>(2 * renderDistance + 1) * (2 * renderDistance + 1));
+    for (int x = -renderDistance; x <= renderDistance; x++) {
+        for (int z = -renderDistance; z <= renderDistance; z++) {
+            loadOrder.emplace_back(x, z);
         }
     }
-
-    // Sort by distance
-    std::sort(chunkPositions.begin(), chunkPositions.end(),
-        [](const std::pair<uint64_t, float>& a, const std::pair<uint64_t, float>& b) {
-            return a.second < b.second;
+    // Nearest first by real (circular) distance, ties broken by position so the order is the same every run
+    std::sort(loadOrder.begin(), loadOrder.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
+        int da = a.x * a.x + a.y * a.y, db = b.x * b.x + b.y * b.y;
+        if (da != db) return da < db;
+        return a.x != b.x ? a.x < b.x : a.y < b.y;
         });
+    loadCursor = 0;
+    areaChanged = true;
+}
 
-    std::unordered_set<uint64_t> loadedChunks;
-    loadedChunks.reserve(chunkPositions.size());//reduce rehashing
-    int chunksGeneratedThisFrame = 0;
-    const int maxChunksGeneratedPerFrame = isInitialLoading ? 2 : 1; // Load 2 chunks per frame during initial loading
-
-    for (const auto& pair : chunkPositions) {
-        loadedChunks.insert(pair.first);
-        if (chunksGeneratedThisFrame >= maxChunksGeneratedPerFrame) continue;
-
-        if (chunks.find(pair.first) == chunks.end() && chunkGenerationFutures.find(pair.first) == chunkGenerationFutures.end()) {
-            generateChunkAsync(chunkKeyX(pair.first), chunkKeyZ(pair.first));
-            chunksGeneratedThisFrame++;
+void World::updateLoading(const glm::ivec3& playerChunkPos) {
+    // Start as many generation jobs as there are free workers, nearest missing chunks first
+    // (a fixed number per frame made loading speed depend on the frame rate instead of the CPU)
+    size_t running = chunkGenerationFutures.size();
+    while (loadCursor < loadOrder.size() && running < maxAsyncTasks()) {
+        int chunkX = playerChunkPos.x + loadOrder[loadCursor].x;
+        int chunkZ = playerChunkPos.z + loadOrder[loadCursor].y;
+        uint64_t key = getChunkKey(chunkX, chunkZ);
+        if (chunks.find(key) == chunks.end() && chunkGenerationFutures.find(key) == chunkGenerationFutures.end()) {
+            generateChunkAsync(chunkX, chunkZ);
+            running++;
         }
+        loadCursor++;
     }
 
-    // Update the loading radius
-    if (isInitialLoading) {
-        // Check if all chunks within the current radius are loaded
-        int expectedChunks = (2 * currentLoadingRadius + 1) * (2 * currentLoadingRadius + 1);
-        int loadedChunksCount = 0;
-        for (const auto& pair : chunks) {
-            int dx = std::abs(chunkKeyX(pair.first) - playerChunkPos.x);
-            int dz = std::abs(chunkKeyZ(pair.first) - playerChunkPos.z);
-            if (dx <= currentLoadingRadius && dz <= currentLoadingRadius) {
-                loadedChunksCount++;
-            }
-        }
-        if (loadedChunksCount >= expectedChunks) {
-            currentLoadingRadius++;
-            if (currentLoadingRadius > renderDistance) {
-                isInitialLoading = false;
-                std::cout << "Initial loading complete! All chunks within render distance loaded." << std::endl;
-            }
-        }
+    if (isInitialLoading && loadCursor == loadOrder.size() && chunkGenerationFutures.empty()) {
+        isInitialLoading = false;
+        std::cout << "Initial loading complete! All chunks within render distance loaded." << std::endl;
     }
+}
 
-    // Mark chunks as active/inactive
+bool World::isInRange(uint64_t key) const {
+    return std::abs(chunkKeyX(key) - lastPlayerChunk.x) <= renderDistance
+        && std::abs(chunkKeyZ(key) - lastPlayerChunk.z) <= renderDistance;
+}
+
+void World::updateActiveChunks() {
+    // Active = inside render distance, drawn and meshed. Inactive chunks wait in the unload margin
     for (auto& pair : chunks) {
-        pair.second.isActive = loadedChunks.find(pair.first) != loadedChunks.end();
+        pair.second.isActive = isInRange(pair.first);
     }
 }
 
@@ -200,9 +199,8 @@ void World::tryApplyChunkGeneration(bool waitForAll) {
             uint64_t key = it->first; // The key is the uint64_t chunk identifier
             auto inserted = chunks.emplace(key, it->second.get());
             Chunk& chunk = inserted.first->second;
-
-            // Initialize buffers for rendering
-            chunk.initializeBuffers();
+            chunk.isActive = isInRange(key);//the player may have moved while it generated
+            requestMesh(key);
 
             // Neighbours meshed without this chunk have faces and ambient occlusion on the shared border, rebuild them
             markNeighboursForRebuild(chunkKeyX(key), chunkKeyZ(key));
@@ -221,8 +219,8 @@ void World::markNeighboursForRebuild(int chunkX, int chunkZ) {
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             if (dx == 0 && dz == 0) continue;
-            if (Chunk* neighbour = findChunk(chunkX + dx, chunkZ + dz)) {
-                neighbour->fullRebuildNeeded = true;
+            if (findChunk(chunkX + dx, chunkZ + dz)) {
+                requestMesh(getChunkKey(chunkX + dx, chunkZ + dz));
             }
         }
     }
@@ -240,6 +238,7 @@ void World::unloadFarChunks(const glm::ivec3& playerChunkPos) {
                 storage.store(it->first, encodeBlocks(it->second.blocks));
             }
             // Any mesh job still running for it only has a copy, its result is dropped when it finishes
+            meshPool.release(it->second.mesh);
             it = chunks.erase(it);
         }
         else {
@@ -268,6 +267,7 @@ void World::launchChunkMesh(uint64_t key, Chunk& chunk) {
     ChunkMeshInput input = chunk.makeMeshInput(neighbours);
     // Cleared before the job runs, so edits made while it runs queue another rebuild
     chunk.fullRebuildNeeded = false;
+    meshQueue.erase(key);
 
     MeshJob& job = chunkMeshFutures[key];
     job.editTime = chunk.pendingEditTime;//this job's copy includes that edit
@@ -292,7 +292,8 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
 
         MeshData mesh = job.future.get();
         if (Chunk* chunk = findChunk(chunkKeyX(it->first), chunkKeyZ(it->first))) {
-            chunk->uploadMesh(mesh);
+            meshPool.upload(chunk->mesh, mesh.vertices);
+            chunk->currentTallestBlock = mesh.tallestBlock;
             // The edit is on screen from the next frame
             if (job.editTime >= 0.0) editLatencyTimer.add(nowSeconds() - job.editTime);
         }// else the chunk was unloaded while meshing
@@ -304,14 +305,20 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
 
     // Chunks waiting for a mesh, closest to the player first
     std::vector<std::pair<float, uint64_t>> waiting;
-    for (auto& pair : chunks) {
-        const Chunk& chunk = pair.second;
-        if (!chunk.isActive || !chunk.fullRebuildNeeded) continue;
-        if (chunkMeshFutures.find(pair.first) != chunkMeshFutures.end()) continue;//one job per chunk at a time
-
-        float dx = chunk.chunkPosition.x + Chunk::chunkSize * 0.5f - playerPosition.x;
-        float dz = chunk.chunkPosition.z + Chunk::chunkSize * 0.5f - playerPosition.z;
-        waiting.emplace_back(dx * dx + dz * dz, pair.first);
+    for (auto it = meshQueue.begin(); it != meshQueue.end();) {
+        const Chunk* chunk = findChunk(chunkKeyX(*it), chunkKeyZ(*it));
+        if (!chunk || !chunk->fullRebuildNeeded) {
+            it = meshQueue.erase(it);//unloaded since it was queued
+            continue;
+        }
+        // Inactive chunks stay queued, they get meshed if the player comes back into range
+        bool running = chunkMeshFutures.find(*it) != chunkMeshFutures.end();//one job per chunk at a time
+        if (chunk->isActive && !running) {
+            float dx = chunk->chunkPosition.x + Chunk::chunkSize * 0.5f - playerPosition.x;
+            float dz = chunk->chunkPosition.z + Chunk::chunkSize * 0.5f - playerPosition.z;
+            waiting.emplace_back(dx * dx + dz * dz, *it);
+        }
+        ++it;
     }
 
     size_t launchCount = std::min(freeSlots, waiting.size());
@@ -319,6 +326,13 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
     for (size_t i = 0; i < launchCount; i++) {
         uint64_t key = waiting[i].second;
         launchChunkMesh(key, chunks.at(key));
+    }
+}
+
+void World::requestMesh(uint64_t key) {
+    if (Chunk* chunk = findChunk(chunkKeyX(key), chunkKeyZ(key))) {
+        chunk->fullRebuildNeeded = true;
+        meshQueue.insert(key);
     }
 }
 
@@ -358,12 +372,11 @@ void World::setBlock(const glm::ivec3& worldPos, BlockType type) {
     int localX = worldPos.x - chunkX * Chunk::chunkSize;
     int localZ = worldPos.z - chunkZ * Chunk::chunkSize;
     chunk->setBlock(localX, localY, localZ, type);
+    requestMesh(getChunkKey(chunkX, chunkZ));
     if (chunk->pendingEditTime < 0.0) chunk->pendingEditTime = nowSeconds();
 
     // Blocks on the edge change the neighbour's visible faces and ambient occlusion too
-    auto rebuild = [this](int x, int z) {
-        if (Chunk* neighbour = findChunk(x, z)) neighbour->fullRebuildNeeded = true;
-    };
+    auto rebuild = [this](int x, int z) { requestMesh(getChunkKey(x, z)); };
     int edgeX = (localX == 0) ? -1 : (localX == Chunk::chunkSize - 1) ? 1 : 0;
     int edgeZ = (localZ == 0) ? -1 : (localZ == Chunk::chunkSize - 1) ? 1 : 0;
     if (edgeX != 0) rebuild(chunkX + edgeX, chunkZ);

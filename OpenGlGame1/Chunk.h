@@ -2,9 +2,9 @@
 #include<vector>
 #include<glm/glm.hpp>
 #include <glad/glad.h>
-#include<GLFW/glfw3.h>
 #include "BlockType.h"
 #include "MeshData.h"
+#include "ChunkMeshPool.h"
 
 #include "VertexPacking.h"
 #include <glm/packing.hpp>
@@ -23,13 +23,11 @@ public:
 
 	Chunk(glm::ivec3 position, const TerrainGenerator& terrain);//constructor, generates terrain (safe to run on a worker thread)
 	Chunk(glm::ivec3 position, std::vector<BlockType> savedBlocks);//restores a chunk the player modified earlier
-	~Chunk();
-	// Delete copy constructor and copy assignment operator
+	// Copying 64KB of blocks by accident would be slow, moving is fine (the mesh is just offsets into ChunkMeshPool)
 	Chunk(const Chunk&) = delete;
 	Chunk& operator=(const Chunk&) = delete;
-	// Move transfers the GL buffers so they are only deleted once
-	Chunk(Chunk&& other) noexcept;
-	Chunk& operator=(Chunk&& other) noexcept;
+	Chunk(Chunk&&) noexcept = default;
+	Chunk& operator=(Chunk&&) noexcept = default;
 
 	void setBlock(int x, int y, int z, BlockType type);
 	BlockType getBlock(int x, int y, int z) const;
@@ -42,20 +40,13 @@ public:
 	ChunkMeshInput makeMeshInput(const Chunk* const neighbours[8]) const;
 	static MeshData buildMesh(const ChunkMeshInput& input);//greedy meshing with ambient occlusion
 
-	void initializeBuffers(); // create VAO/VBO/EBO, main thread only
-	void uploadMesh(const MeshData& mesh); // main thread only
-
-	unsigned int VBO = 0, VAO = 0, EBO = 0;
-	GLsizei indexCount = 0;
-	size_t meshBytes = 0;//vertex + index buffer size on the GPU, for the debug overlay
+	MeshAllocation mesh;//where its mesh is in World's ChunkMeshPool, World uploads and releases it
+	GLsizei indexCount() const { return mesh.indexCount(); }
 	glm::vec3 chunkPosition;
 
 	std::vector<BlockType> blocks;//dense array, uses more ram, quicker lookup
 	bool fullRebuildNeeded = true;
 	bool modified = false;//player changed a block, so it must be kept when unloaded (it can't be regenerated)
 	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
-
-private:
-	void releaseBuffers();
 };
 

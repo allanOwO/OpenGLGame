@@ -1,13 +1,17 @@
 #pragma once
 #include <memory>
+#include <vector>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 
 #include "Shader.h"
 #include "Frustum.h"
 #include "DebugStats.h"
+#include "GpuTimer.h"
+#include "ChunkMeshPool.h"
 
 class World;
+class Chunk;
 struct RaycastHit;
 
 // Everything that talks to OpenGL for drawing a frame: shaders, textures, shadow map, sun and block outline
@@ -26,7 +30,9 @@ public:
 		int width, int height, float time, float farPlane, const RaycastHit* highlight);
 
 	const RenderStats& getStats() const { return stats; }//counts from the last render()
-	float getGpuMs() const { return gpuMs; }//GPU time of a recent render(), a few frames behind
+	// GPU time of a recent render(), a few frames behind
+	float getGpuMs() const { return shadowTimer.ms() + mainTimer.ms(); }
+	float getGpuShadowMs() const { return shadowTimer.ms(); }//just the shadow map pass
 
 private:
 	void createShaders();
@@ -36,7 +42,7 @@ private:
 	void createHighlight();
 
 	void renderShadowMap(const World& world);
-	void drawChunks(const World& world);
+	void drawChunks(const World& world, const glm::vec3& cameraPos);
 	void drawHighlight(const RaycastHit& highlight, const glm::mat4& view, const glm::mat4& projection);
 	void renderSun(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& sunDirection, const glm::vec3& cameraPos);
 
@@ -47,10 +53,10 @@ private:
 	std::unique_ptr<Shader> highlightShader;//plain coloured lines for the block outline
 
 	// uniform locations, looked up once
-	GLint modelLocation, viewLocation, projectionLocation, textureLocation, sunDirLoc, camPosLoc;
+	GLint viewLocation, projectionLocation, textureLocation, sunDirLoc, camPosLoc;
 	GLint shadowMapLoc, mainLightSpaceLoc;
 	GLint sunViewLoc, sunProjLoc, sunColourLoc, sunSunDirLoc, sunCamPosLoc;
-	GLint lightSpaceLoc, depthModelLoc;
+	GLint lightSpaceLoc;
 	GLint highlightModelLoc, highlightViewLoc, highlightProjLoc, highlightColourLoc;
 
 	// buffers store data on gpu, vbo is vertex positions, ebo defines how these connect, vao acts like a container for these
@@ -60,14 +66,15 @@ private:
 
 	Frustum frustum;
 	RenderStats stats;
+	// Per frame draw lists, kept between frames so they don't reallocate
+	std::vector<std::pair<float, const Chunk*>> visibleChunks;//distance squared
+	std::vector<DrawCommand> drawCommands;
+	std::vector<glm::vec3> drawOrigins;
+	void drawList(const World& world);//draws visibleChunks in one call
 
-	// GPU timing: the GPU runs behind the CPU, so asking for a query's result straight away would stall until it catches up
-	// Instead several queries take turns and each one is read a few frames later when it's ready
-	static const int GPU_QUERY_COUNT = 4;
-	GLuint gpuQueries[GPU_QUERY_COUNT] = {};
-	bool gpuQueryStarted[GPU_QUERY_COUNT] = {};
-	int gpuQueryIndex = 0;
-	float gpuMs = 0.0f;
+	// GPU time of each pass, measured separately so the overlay can show which one is expensive
+	GpuTimer shadowTimer;
+	GpuTimer mainTimer;//chunks, block outline and sun
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light
 
 	// shadow stuff

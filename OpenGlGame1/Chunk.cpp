@@ -1,9 +1,6 @@
 #include "Chunk.h"
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
 #include <iostream>
 #include <algorithm>
-#include <cstddef>//offsetof
 
 #include "TerrainGenerator.h"
 #include "BlockConstants.h"
@@ -59,105 +56,6 @@ Chunk::Chunk(glm::ivec3 position, std::vector<BlockType> savedBlocks)
 			}
 		}
 	}
-}
-
-Chunk::~Chunk() {
-	releaseBuffers();
-}
-
-Chunk::Chunk(Chunk&& other) noexcept
-	: currentTallestBlock(other.currentTallestBlock), isActive(other.isActive),
-	VBO(other.VBO), VAO(other.VAO), EBO(other.EBO), indexCount(other.indexCount), meshBytes(other.meshBytes),
-	chunkPosition(other.chunkPosition), blocks(std::move(other.blocks)),
-	fullRebuildNeeded(other.fullRebuildNeeded), modified(other.modified), pendingEditTime(other.pendingEditTime)
-{
-	// Reset the other object's buffer IDs to prevent double deletion
-	other.VAO = 0;
-	other.VBO = 0;
-	other.EBO = 0;
-	other.indexCount = 0;
-	other.meshBytes = 0;
-}
-
-Chunk& Chunk::operator=(Chunk&& other) noexcept {
-	if (this != &other) {
-		releaseBuffers();
-
-		currentTallestBlock = other.currentTallestBlock;
-		isActive = other.isActive;
-		VBO = other.VBO;
-		VAO = other.VAO;
-		EBO = other.EBO;
-		indexCount = other.indexCount;
-		meshBytes = other.meshBytes;
-		chunkPosition = other.chunkPosition;
-		blocks = std::move(other.blocks);
-		fullRebuildNeeded = other.fullRebuildNeeded;
-		modified = other.modified;
-		pendingEditTime = other.pendingEditTime;
-
-		other.VAO = 0;
-		other.VBO = 0;
-		other.EBO = 0;
-		other.indexCount = 0;
-		other.meshBytes = 0;
-	}
-	return *this;
-}
-
-void Chunk::releaseBuffers() {
-	if (VAO != 0) glDeleteVertexArrays(1, &VAO);
-	if (VBO != 0) glDeleteBuffers(1, &VBO);
-	if (EBO != 0) glDeleteBuffers(1, &EBO);
-	VAO = VBO = EBO = 0;
-	indexCount = 0;
-	meshBytes = 0;
-}
-
-void Chunk::initializeBuffers() {
-	if (VAO != 0) {
-		// Already initialized
-		return;
-	}
-
-	glGenVertexArrays(1, &VAO);
-	glGenBuffers(1, &VBO);
-	glGenBuffers(1, &EBO);
-
-	glBindVertexArray(VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-
-	//layout only needs setting once, uploadMesh just replaces the buffer contents
-	//IPointer keeps them as integers in the shader (no conversion to float), locations match vertex_shader.glsl
-	glVertexAttribIPointer(0, 3, GL_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, pos));
-	glVertexAttribIPointer(1, 1, GL_UNSIGNED_BYTE, sizeof(PackedVertex), (void*)offsetof(PackedVertex, normal));
-	glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, sizeof(PackedVertex), (void*)offsetof(PackedVertex, ao));
-	glVertexAttribIPointer(3, 2, GL_UNSIGNED_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, uv));
-	glVertexAttribIPointer(4, 1, GL_UNSIGNED_SHORT, sizeof(PackedVertex), (void*)offsetof(PackedVertex, tile));
-	for (int i = 0; i <= 4; i++) {
-		glEnableVertexAttribArray(i);
-	}
-
-	glBindVertexArray(0);
-}
-
-void Chunk::uploadMesh(const MeshData& mesh) {
-	if (VAO == 0) {
-		std::cerr << "uploadMesh called before initializeBuffers" << std::endl;
-		return;
-	}
-
-	glBindVertexArray(VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, mesh.vertices.size() * sizeof(PackedVertex), mesh.vertices.data(), GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size() * sizeof(unsigned int), mesh.indices.data(), GL_DYNAMIC_DRAW);
-	glBindVertexArray(0);
-
-	indexCount = static_cast<GLsizei>(mesh.indices.size());
-	meshBytes = mesh.vertices.size() * sizeof(PackedVertex) + mesh.indices.size() * sizeof(unsigned int);
-	currentTallestBlock = mesh.tallestBlock;
 }
 
 ChunkMeshInput Chunk::makeMeshInput(const Chunk* const neighbours[8]) const {
@@ -264,9 +162,13 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 	const int backward[4] = { 0, 3, 2, 1 };
 	const int* order = direction > 0 ? forward : backward;
 
-	unsigned int base = static_cast<unsigned int>(mesh.vertices.size());
+	// Every quad is drawn with the same shared indices 0,1,2 0,2,3 (see ChunkMeshPool), which split it along
+	// the first and third vertex. Either diagonal works, but the GPU blends AO across each triangle,
+	// so split along the brighter one: starting one corner later moves the split to the other diagonal
+	// (going round the same corners from a different start keeps the winding, so the face still points out)
+	int start = (ao[0] + ao[2] < ao[1] + ao[3]) ? 1 : 0;
 	for (int i = 0; i < 4; i++) {
-		int c = order[i];
+		int c = order[(i + start) % 4];
 		glm::ivec2 uv = faceUV(face, corners[c]);
 		PackedVertex vertex{};
 		vertex.pos[0] = static_cast<int16_t>(corners[c].x);
@@ -278,17 +180,6 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 		vertex.uv[1] = static_cast<uint16_t>(uv.y);
 		vertex.tile = tile;
 		mesh.vertices.push_back(vertex);
-	}
-
-	// A quad is 2 triangles and either diagonal works, but the GPU blends AO across each triangle
-	// Split along the brighter diagonal so one dark corner doesn't smear across the whole quad
-	if (ao[0] + ao[2] < ao[1] + ao[3]) {
-		unsigned int indices[6] = { base, base + 1, base + 3, base + 1, base + 2, base + 3 };
-		mesh.indices.insert(mesh.indices.end(), indices, indices + 6);
-	}
-	else {
-		unsigned int indices[6] = { base, base + 1, base + 2, base, base + 2, base + 3 };
-		mesh.indices.insert(mesh.indices.end(), indices, indices + 6);
 	}
 }
 

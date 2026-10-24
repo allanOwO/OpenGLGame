@@ -25,7 +25,8 @@ struct FrameTimes {
 	float frameMs = 0.0f;//start of one frame to the start of the next
 	float updateMs = 0.0f;//CPU: game + world update (chunk loading, job launching, mesh uploads)
 	float renderMs = 0.0f;//CPU: issuing the world's draw calls
-	float gpuMs = 0.0f;//GPU: actually drawing the world
+	float gpuMs = 0.0f;//GPU: actually drawing the world, all passes
+	float gpuShadowMs = 0.0f;//GPU: the shadow map pass, part of gpuMs
 };
 
 // The F3 screen: frame timing, a frame time graph, position, chunk and job counts, memory

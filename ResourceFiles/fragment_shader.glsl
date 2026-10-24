@@ -76,6 +76,9 @@ float ShadowCalc(vec4 fragPosLightSpace)
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w; // Perspective divide
     projCoords = projCoords * 0.5 + 0.5; // Transform to [0,1]
     if (projCoords.z > 1.0) return 0.0; // Outside far plane, no shadow
+    // Outside the shadow map's area every tap would hit the border (no shadow), so skip the 9 lookups
+    // Most of the screen is in this case at long render distances, the shadow box only covers 100 blocks around the player
+    if (any(lessThan(projCoords.xy, vec2(0.0))) || any(greaterThan(projCoords.xy, vec2(1.0)))) return 0.0;
 
     //smooth shadows
     float shadow = 0.0;

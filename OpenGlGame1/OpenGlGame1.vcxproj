@@ -162,6 +162,7 @@
     <ClCompile Include="WorldSave.cpp" />
     <ClCompile Include="DebugOverlay.cpp" />
     <ClCompile Include="Benchmark.cpp" />
+    <ClCompile Include="ChunkMeshPool.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockConstants.h" />
@@ -187,6 +188,10 @@
     <ClInclude Include="WorldSave.h" />
     <ClInclude Include="FileUtil.h" />
     <ClInclude Include="DebugStats.h" />
+    <ClInclude Include="GpuTimer.h" />
+    <ClInclude Include="Screenshot.h" />
+    <ClInclude Include="ChunkMeshPool.h" />
+    <ClInclude Include="GLFunctions.h" />
     <ClInclude Include="DebugOverlay.h" />
     <ClInclude Include="Benchmark.h" />
   </ItemGroup>

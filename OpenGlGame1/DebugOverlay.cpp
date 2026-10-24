@@ -70,6 +70,7 @@ void DebugOverlay::recordFrame(const FrameTimes& times) {
 	windowTotals.updateMs += times.updateMs;
 	windowTotals.renderMs += times.renderMs;
 	windowTotals.gpuMs += times.gpuMs;
+	windowTotals.gpuShadowMs += times.gpuShadowMs;
 }
 
 void DebugOverlay::updateAverages(const World& world) {
@@ -81,6 +82,7 @@ void DebugOverlay::updateAverages(const World& world) {
 	shownTimes.updateMs = windowTotals.updateMs / frames;
 	shownTimes.renderMs = windowTotals.renderMs / frames;
 	shownTimes.gpuMs = windowTotals.gpuMs / frames;
+	shownTimes.gpuShadowMs = windowTotals.gpuShadowMs / frames;
 
 	// Jobs that finished during the window, the old value stays if none did
 	WorldStats stats = world.getStats();
@@ -118,7 +120,7 @@ void DebugOverlay::draw(UI& ui, const World& world, const Renderer& renderer,
 		{ "DEBUG (F3)", heading },
 		{ fixed(shownFrames.averageFps, 0) + " FPS  " + fixed(shownFrames.averageMs, 2) + " MS  1% LOW " + fixed(shownFrames.onePercentLowFps, 0) + " FPS", white },
 		{ "CPU UPDATE " + fixed(shownTimes.updateMs, 2) + " MS  RENDER " + fixed(shownTimes.renderMs, 2) + " MS", white },
-		{ "GPU " + fixed(shownTimes.gpuMs, 2) + " MS", white },
+		{ "GPU " + fixed(shownTimes.gpuMs, 2) + " MS  (SHADOW PASS " + fixed(shownTimes.gpuShadowMs, 2) + " MS)", white },
 		{ "", white },
 		{ "XYZ " + fixed(cameraPos.x, 1) + " / " + fixed(cameraPos.y, 1) + " / " + fixed(cameraPos.z, 1), white },
 		{ "BLOCK " + std::to_string(block.x) + " " + std::to_string(block.y) + " " + std::to_string(block.z)

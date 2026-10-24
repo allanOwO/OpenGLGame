@@ -5,9 +5,9 @@
 
 
 struct MeshData {
-	//whole chunk in one buffer, all block types share the texture atlas so it's 1 draw call
+	//whole chunk in one range of ChunkMeshPool's buffer, all block types share the texture atlas
+	//4 vertices per quad, no index list: every quad uses the pool's shared 0,1,2 0,2,3 indices
 	std::vector<PackedVertex> vertices;
-	std::vector<unsigned int> indices;
 	int tallestBlock = 0;//highest non air block, for frustum culling
 };
 

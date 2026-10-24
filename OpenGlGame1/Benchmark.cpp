@@ -46,7 +46,8 @@ namespace {
 }
 
 Benchmark::Benchmark(const World& world, int screenWidth, int screenHeight)
-	: renderDistance(world.getRenderDistance()), screenWidth(screenWidth), screenHeight(screenHeight) {
+	: renderDistance(world.getRenderDistance()), screenWidth(screenWidth), screenHeight(screenHeight),
+	runName("benchmark_" + timestamp("%Y-%m-%d_%H-%M-%S")) {
 
 	// Sample the terrain along the flight path once, so the path is the same every run
 	const TerrainGenerator& terrain = world.getTerrain();
@@ -127,6 +128,19 @@ std::string Benchmark::status() const {
 	return text + "   (ESC TO CANCEL)";
 }
 
+std::string Benchmark::screenshotPath() {
+	// First frame of the spin (everything loaded, facing +X) and halfway through the flight
+	const char* name = nullptr;
+	if (screenshotsTaken == 0 && phase == Phase::Spin) name = "spin";
+	else if (screenshotsTaken == 1 && phase == Phase::Flight && phaseTime >= flightSeconds * 0.5) name = "flight";
+	if (!name) return "";
+
+	screenshotsTaken++;
+	std::error_code error;
+	std::filesystem::create_directories(resultsFolder, error);
+	return std::string(resultsFolder) + "/" + runName + "_" + name + ".bmp";
+}
+
 // ---------- running ----------
 
 void Benchmark::recordFrame(const FrameTimes& times, const RenderStats& render) {
@@ -136,6 +150,7 @@ void Benchmark::recordFrame(const FrameTimes& times, const RenderStats& render) 
 	r.updateMs += times.updateMs;
 	r.renderMs += times.renderMs;
 	r.gpuMs += times.gpuMs;
+	r.gpuShadowMs += times.gpuShadowMs;
 	r.triangles += render.triangles;
 	r.drawCalls += render.drawCalls;
 }
@@ -286,7 +301,7 @@ std::vector<std::string> Benchmark::finish() {
 	// ---- files ----
 	std::error_code error;
 	std::filesystem::create_directories(resultsFolder, error);
-	std::string reportPath = std::string(resultsFolder) + "/benchmark_" + timestamp("%Y-%m-%d_%H-%M-%S") + ".txt";
+	std::string reportPath = std::string(resultsFolder) + "/" + runName + ".txt";
 
 	std::ofstream report(reportPath);
 	if (report) {
@@ -294,16 +309,16 @@ std::vector<std::string> Benchmark::finish() {
 		for (const std::string& line : lines) report << line << "\n";
 
 		// Full detail per phase, the screen only has room for the headline numbers
-		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  triangles  draw_calls\n";
+		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_calls\n";
 		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits };
 		const char* names[] = { "load", "spin", "flight", "edits" };
 		for (int i = 0; i < 4; i++) {
 			const PhaseRecord& r = *phases[i];
 			FrameSummary f = r.frames();
 			char row[256];
-			std::snprintf(row, sizeof(row), "%-8s %7.2f  %6d  %7.1f  %10.1f  %8.2f  %9.3f  %9.3f  %6.3f  %9.0f  %10.0f\n",
+			std::snprintf(row, sizeof(row), "%-8s %7.2f  %6d  %7.1f  %10.1f  %8.2f  %9.3f  %9.3f  %6.3f  %9.3f  %9.0f  %10.0f\n",
 				names[i], r.seconds, f.frames, f.averageFps, f.onePercentLowFps, f.worstMs,
-				r.average(r.updateMs), r.average(r.renderMs), r.average(r.gpuMs),
+				r.average(r.updateMs), r.average(r.renderMs), r.average(r.gpuMs), r.average(r.gpuShadowMs),
 				r.average(static_cast<double>(r.triangles)), r.average(static_cast<double>(r.drawCalls)));
 			report << row;
 		}

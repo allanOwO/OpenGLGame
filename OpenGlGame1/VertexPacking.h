@@ -13,4 +13,4 @@ struct PackedVertex {
     uint16_t padding;   // keeps the size a round 16 bytes (2 bytes)
 };
 
-static_assert(sizeof(PackedVertex) == 16, "PackedVertex layout changed, update Chunk::initializeBuffers and vertex_shader.glsl");
+static_assert(sizeof(PackedVertex) == 16, "PackedVertex layout changed, update ChunkMeshPool::setVertexAttributes and vertex_shader.glsl");
