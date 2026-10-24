@@ -12,6 +12,7 @@
 
 class World;
 class Chunk;
+struct ChunkRegion;
 struct RaycastHit;
 
 // Everything that talks to OpenGL for drawing a frame: shaders, textures, shadow map, sun and block outline
@@ -67,10 +68,23 @@ private:
 	Frustum frustum;
 	RenderStats stats;
 	// Per frame draw lists, kept between frames so they don't reallocate
-	std::vector<std::pair<float, const Chunk*>> visibleChunks;//distance squared
+	struct VisibleSection {
+		const MeshAllocation* mesh;
+		glm::vec3 origin;
+	};
+	std::vector<VisibleSection> visibleSections;
 	std::vector<DrawCommand> drawCommands;
 	std::vector<glm::vec3> drawOrigins;
-	void drawList(const World& world);//draws visibleChunks in one call
+	void drawList(const World& world);//draws visibleSections in one call
+	// Fills visibleSections with the sections inside the frustum that have a mesh, testing whole regions first
+	// nearestFirst sorts regions by distance (chunks within a region are close together, so that's near enough for depth)
+	void collectVisible(const World& world, const Frustum& view, const glm::vec3& cameraPos, bool nearestFirst, bool countStats);
+	struct VisibleRegion {
+		float distanceSquared;
+		bool fullyInside;//its chunks can skip their own frustum tests
+		const ChunkRegion* region;
+	};
+	std::vector<VisibleRegion> visibleRegions;
 
 	// GPU time of each pass, measured separately so the overlay can show which one is expensive
 	GpuTimer shadowTimer;

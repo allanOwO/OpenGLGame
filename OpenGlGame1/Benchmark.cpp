@@ -35,6 +35,14 @@ namespace {
 		return fixed(bytes / (1024.0 * 1024.0), 1);
 	}
 
+	// The value 99% of frames are faster than, by value since nth_element reorders it
+	double percentile99(std::vector<float> values) {
+		if (values.empty()) return 0.0;
+		size_t index = std::min(values.size() - 1, static_cast<size_t>(values.size() * 0.99));
+		std::nth_element(values.begin(), values.begin() + index, values.end());
+		return values[index];
+	}
+
 	std::string timestamp(const char* format) {
 		std::time_t now = std::time(nullptr);
 		std::tm local{};
@@ -143,16 +151,20 @@ std::string Benchmark::screenshotPath() {
 
 // ---------- running ----------
 
-void Benchmark::recordFrame(const FrameTimes& times, const RenderStats& render) {
+void Benchmark::recordFrame(const FrameTimes& times, const RenderStats& render, const UpdateTimes& parts) {
 	if (phase == Phase::Done) return;
 	PhaseRecord& r = record();
 	r.frameMs.push_back(times.frameMs);
+	r.updateList.push_back(times.updateMs);
+	r.renderList.push_back(times.renderMs);
+	r.gpuList.push_back(times.gpuMs);
+	r.updateParts.push_back(parts);
 	r.updateMs += times.updateMs;
 	r.renderMs += times.renderMs;
 	r.gpuMs += times.gpuMs;
 	r.gpuShadowMs += times.gpuShadowMs;
 	r.triangles += render.triangles;
-	r.drawCalls += render.drawCalls;
+	r.drawCalls += render.drawCommands;//one command per section, comparable with the old one draw call per chunk
 }
 
 void Benchmark::update(World& world, double deltaSeconds) {
@@ -294,7 +306,7 @@ std::vector<std::string> Benchmark::finish() {
 		frameLine("SPIN    ", spin, spinFrames),
 		frameLine("FLIGHT  ", flight, flightFrames) + "  " + fixed(streamedPerSecond, 0) + " CHUNKS/S",
 		"EDITS   " + std::to_string(editsShown) + " EDITS  EDIT TO SCREEN " + fixed(editLatencyMs, 1) + " MS  MESH " + fixed(editMeshMs, 2) + " MS",
-		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAW CALLS",
+		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAWS (1 CALL)",
 		"MEMORY  BLOCKS " + megabytes(finalStats.blockBytes) + " MB  MESHES " + megabytes(finalStats.meshBytes) + " MB",
 	};
 
@@ -309,7 +321,7 @@ std::vector<std::string> Benchmark::finish() {
 		for (const std::string& line : lines) report << line << "\n";
 
 		// Full detail per phase, the screen only has room for the headline numbers
-		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_calls\n";
+		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_cmds\n";
 		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits };
 		const char* names[] = { "load", "spin", "flight", "edits" };
 		for (int i = 0; i < 4; i++) {
@@ -320,6 +332,33 @@ std::vector<std::string> Benchmark::finish() {
 				names[i], r.seconds, f.frames, f.averageFps, f.onePercentLowFps, f.worstMs,
 				r.average(r.updateMs), r.average(r.renderMs), r.average(r.gpuMs), r.average(r.gpuShadowMs),
 				r.average(static_cast<double>(r.triangles)), r.average(static_cast<double>(r.drawCalls)));
+			report << row;
+		}
+
+		// Each part on its own, so a stutter can be traced to the CPU update, CPU render or the GPU
+		// (they don't add up to the frame: the CPU and GPU work at the same time)
+		report << "\nslowest 1% of frames (99th percentile, ms)\nphase       frame   update   render      gpu\n";
+		for (int i = 0; i < 4; i++) {
+			const PhaseRecord& r = *phases[i];
+			char row[128];
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f\n", names[i],
+				percentile99(r.frameMs), percentile99(r.updateList), percentile99(r.renderList), percentile99(r.gpuList));
+			report << row;
+		}
+
+		// Inside World::update, same percentile for each part on its own
+		report << "\nslowest 1% of world update parts (99th percentile, ms)\nphase        area    apply     load   upload   launch\n";
+		for (int i = 0; i < 4; i++) {
+			const PhaseRecord& r = *phases[i];
+			auto part = [&r](float UpdateTimes::* member) {
+				std::vector<float> values;
+				values.reserve(r.updateParts.size());
+				for (const UpdateTimes& t : r.updateParts) values.push_back(t.*member);
+				return percentile99(values);
+			};
+			char row[128];
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], part(&UpdateTimes::areaMs),
+				part(&UpdateTimes::applyMs), part(&UpdateTimes::loadMs), part(&UpdateTimes::uploadMs), part(&UpdateTimes::launchMs));
 			report << row;
 		}
 	}

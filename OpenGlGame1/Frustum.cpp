@@ -65,3 +65,18 @@ bool Frustum::isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
     }
     return true; // Box is inside or intersects the frustum
 }
+Frustum::BoxResult Frustum::classifyBox(const glm::vec3& min, const glm::vec3& max) const {
+    BoxResult result = BoxResult::Inside;
+    for (int i = 0; i < 6; i++) {
+        const glm::vec4& plane = planes[i];
+        // Corner furthest along the plane's normal, and the corner furthest against it
+        glm::vec3 positive = min, negative = max;
+        if (plane.x > 0) { positive.x = max.x; negative.x = min.x; }
+        if (plane.y > 0) { positive.y = max.y; negative.y = min.y; }
+        if (plane.z > 0) { positive.z = max.z; negative.z = min.z; }
+
+        if (glm::dot(glm::vec3(plane), positive) + plane.w < 0) return BoxResult::Outside;//even the best corner is outside
+        if (glm::dot(glm::vec3(plane), negative) + plane.w < 0) result = BoxResult::Partly;//this plane cuts through it
+    }
+    return result;
+}

@@ -189,6 +189,7 @@
     <ClInclude Include="FileUtil.h" />
     <ClInclude Include="DebugStats.h" />
     <ClInclude Include="GpuTimer.h" />
+    <ClInclude Include="ThreadPool.h" />
     <ClInclude Include="Screenshot.h" />
     <ClInclude Include="ChunkMeshPool.h" />
     <ClInclude Include="GLFunctions.h" />

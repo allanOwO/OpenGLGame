@@ -1,0 +1,30 @@
+Benchmark 2026-10-24 23:02:26
+SEED 1337  RENDER DISTANCE 64  1920X1080  RELEASE
+AMD Radeon RX 9060 XT
+
+LOAD    16641 CHUNKS IN 6.46 S  GENERATE 0.21 MS  MESH 2.05 MS PER CHUNK
+SPIN    AVG 995 FPS  1% LOW 826  CPU 0.83 MS  GPU 0.87 MS
+FLIGHT  AVG 853 FPS  1% LOW 465  CPU 1.02 MS  GPU 0.92 MS  255 CHUNKS/S
+EDITS   100 EDITS  EDIT TO SCREEN 3.2 MS  MESH 1.96 MS
+SCENE   1.65M TRIANGLES  1 DRAW CALLS
+MEMORY  BLOCKS 1056.2 MB  MESHES 147.4 MB
+
+phase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_calls
+load        6.46    3417    529.0       276.6     78.21      1.256      0.468   0.532      0.178     743558           1
+spin       10.00    9953    995.2       825.7      8.26      0.001      0.824   0.868      0.164    1650588           1
+flight     20.00   17067    853.3       464.5      9.00      0.137      0.880   0.917      0.179    1746495           1
+edits       5.50    5163    938.7       600.5      2.48      0.020      0.856   0.925      0.166    1782991           1
+
+slowest 1% of frames (99th percentile, ms)
+phase       frame   update   render      gpu
+load         3.62     2.85     0.91     0.91
+spin         1.21     0.00     1.09     0.96
+flight       2.15     1.23     1.06     0.99
+edits        1.67     0.74     1.03     0.99
+
+slowest 1% of world update parts (99th percentile, ms)
+phase        area    apply     load   upload   launch
+load         0.00     0.02     0.09     0.95     1.95
+spin         0.00     0.00     0.00     0.00     0.00
+flight       0.00     0.01     0.03     0.80     0.63
+edits        0.00     0.00     0.00     0.26     0.52

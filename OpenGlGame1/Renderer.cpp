@@ -283,19 +283,10 @@ void Renderer::renderShadowMap(const World& world) {
     lightFrustum.update(lightSpaceMatrix);
 
     //render chunks 1st pass to create shadows, depth only so the order doesn't matter
-    visibleChunks.clear();
-    for (const auto& pair : world.getChunks()) {
-        const Chunk& chunk = pair.second;
-        if (!chunk.isActive || chunk.indexCount() == 0) continue;
-
-        glm::vec3 min = chunk.chunkPosition;
-        glm::vec3 max = min + glm::vec3(Chunk::chunkSize, chunk.currentTallestBlock + 1, Chunk::chunkSize);
-        if (!lightFrustum.isBoxInFrustum(min, max)) continue;
-        visibleChunks.emplace_back(0.0f, &chunk);
-        stats.shadowTriangles += chunk.indexCount() / 3;
-    }
+    collectVisible(world, lightFrustum, glm::vec3(0.0f), false, false);
+    for (const VisibleSection& entry : visibleSections) stats.shadowTriangles += entry.mesh->indexCount() / 3;
     drawList(world);
-    if (!visibleChunks.empty()) stats.shadowDrawCalls++;
+    if (!visibleSections.empty()) stats.shadowDrawCalls++;
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -309,36 +300,81 @@ void Renderer::drawChunks(const World& world, const glm::vec3& cameraPos) {
     // Find what's in view first, then draw nearest first
     // Near chunks fill the depth buffer, so pixels of far chunks hidden behind them fail the depth test
     // before the fragment shader runs, instead of being lit and shadowed and then drawn over
-    visibleChunks.clear();
-    for (const auto& pair : world.getChunks()) {
-
-        const Chunk& chunk = pair.second;
-        if (!chunk.isActive || chunk.indexCount() == 0)
-            continue;
-
-        const glm::vec3& pos = chunk.chunkPosition;
-
-        // Frustum culling
-        glm::vec3 min = pos;
-        glm::vec3 max = pos + glm::vec3(Chunk::chunkSize, chunk.currentTallestBlock + 1, Chunk::chunkSize);
-        if (!frustum.isBoxInFrustum(min, max)) {
-            stats.chunksCulled++;
-            continue; // Skip chunks outside the frustum
-        }
-
-        // Horizontal distance to the chunk centre is enough to order columns
-        float dx = pos.x + Chunk::chunkSize * 0.5f - cameraPos.x;
-        float dz = pos.z + Chunk::chunkSize * 0.5f - cameraPos.z;
-        visibleChunks.emplace_back(dx * dx + dz * dz, &chunk);
-        stats.chunksDrawn++;
-        stats.triangles += chunk.indexCount() / 3;
-    }
-    std::sort(visibleChunks.begin(), visibleChunks.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; });
+    collectVisible(world, frustum, cameraPos, true, true);
 
     drawList(world);
-    if (!visibleChunks.empty()) stats.drawCalls++;
+    if (!visibleSections.empty()) stats.drawCalls++;
+    stats.drawCommands = static_cast<int>(visibleSections.size());
     glBindVertexArray(0);
+}
+
+void Renderer::collectVisible(const World& world, const Frustum& view, const glm::vec3& cameraPos, bool nearestFirst, bool countStats) {
+    // Regions first: one test can skip 64 chunks, and a region fully inside the view needs no per chunk tests
+    // (at render distance 64 that's ~300 region tests instead of 16k chunk tests, and the shadow pass skips nearly all of them)
+    const float regionWidth = static_cast<float>(ChunkRegion::regionSize * Chunk::chunkSize);
+    const float bottom = static_cast<float>(-Chunk::baseTerrainHeight);
+    const float top = bottom + Chunk::chunkHeight;
+
+    visibleRegions.clear();
+    for (const auto& pair : world.getRegions()) {
+        const ChunkRegion& region = pair.second;
+        glm::vec3 min(region.coords.x * regionWidth, bottom, region.coords.y * regionWidth);
+        glm::vec3 max = min + glm::vec3(regionWidth, top - bottom, regionWidth);
+        Frustum::BoxResult result = view.classifyBox(min, max);
+        if (result == Frustum::BoxResult::Outside) {
+            if (countStats) stats.regionsCulled++;
+            continue;
+        }
+        float dx = min.x + regionWidth * 0.5f - cameraPos.x;
+        float dz = min.z + regionWidth * 0.5f - cameraPos.z;
+        visibleRegions.push_back({ dx * dx + dz * dz, result == Frustum::BoxResult::Inside, &region });
+    }
+    if (nearestFirst) {
+        std::sort(visibleRegions.begin(), visibleRegions.end(), [](const VisibleRegion& a, const VisibleRegion& b) {
+            return a.distanceSquared < b.distanceSquared;
+        });
+    }
+
+    visibleSections.clear();
+    for (const VisibleRegion& entry : visibleRegions) {
+        for (const Chunk* chunk : entry.region->chunks) {
+            uint32_t meshed = chunk->meshedSections;
+            if (!chunk->isActive || meshed == 0) continue;
+
+            // Whole column next, from its lowest to highest drawn section, same idea as the regions
+            bool testSections = false;
+            if (!entry.fullyInside) {
+                int lowest = 0, highest = Chunk::sectionCount - 1;
+                while (!(meshed & (1u << lowest))) lowest++;
+                while (!(meshed & (1u << highest))) highest--;
+                glm::vec3 min = chunk->sectionOrigin(lowest);
+                glm::vec3 max = chunk->sectionOrigin(highest) + glm::vec3(ChunkSection::size);
+                Frustum::BoxResult result = view.classifyBox(min, max);
+                if (result == Frustum::BoxResult::Outside) {
+                    if (countStats) stats.sectionsCulled++;
+                    continue;
+                }
+                testSections = result == Frustum::BoxResult::Partly;
+            }
+
+            // Only the sections whose bit is set, so empty sky and buried rock cost nothing
+            for (uint32_t bits = meshed; bits != 0; bits &= bits - 1) {//clears the lowest set bit each time
+                int s = 0;
+                while (!(bits & (1u << s))) s++;
+                const MeshAllocation& mesh = chunk->sections[s].mesh;
+                glm::vec3 origin = chunk->sectionOrigin(s);
+                if (testSections && !view.isBoxInFrustum(origin, origin + glm::vec3(ChunkSection::size))) {
+                    if (countStats) stats.sectionsCulled++;
+                    continue;
+                }
+                visibleSections.push_back({ &mesh, origin });
+                if (countStats) {
+                    stats.sectionsDrawn++;
+                    stats.triangles += mesh.indexCount() / 3;
+                }
+            }
+        }
+    }
 }
 
 void Renderer::drawList(const World& world) {
@@ -346,16 +382,15 @@ void Renderer::drawList(const World& world) {
     // The GPU runs through the whole list from a single call, instead of the CPU issuing a draw per chunk
     drawCommands.clear();
     drawOrigins.clear();
-    for (const auto& entry : visibleChunks) {
-        const Chunk& chunk = *entry.second;
+    for (const VisibleSection& entry : visibleSections) {
         DrawCommand command;
-        command.count = static_cast<GLuint>(chunk.indexCount());
+        command.count = static_cast<GLuint>(entry.mesh->indexCount());
         command.instanceCount = 1;
         command.firstIndex = 0;
-        command.baseVertex = chunk.mesh.firstVertex;
+        command.baseVertex = entry.mesh->firstVertex;
         command.baseInstance = static_cast<GLuint>(drawCommands.size());
         drawCommands.push_back(command);
-        drawOrigins.push_back(chunk.chunkPosition);
+        drawOrigins.push_back(entry.origin);
     }
 
     const ChunkMeshPool& pool = world.getMeshPool();

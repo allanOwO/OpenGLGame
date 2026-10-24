@@ -1,14 +1,16 @@
 #include "Chunk.h"
 #include <iostream>
 #include <algorithm>
+#include <cstring>
 
 #include "TerrainGenerator.h"
 #include "BlockConstants.h"
 
 
 
-Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain)
-	: chunkPosition(position), blocks(chunkSize* chunkHeight* chunkSize, BlockType::AIR) {
+Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain) : chunkPosition(position) {
+	// Filled as one column first (simplest to fill), then split into sections and compressed
+	std::vector<BlockType> flat(static_cast<size_t>(chunkSize) * chunkHeight * chunkSize, BlockType::AIR);
 
 	for (int x = 0; x < chunkSize; x++) {
 		for (int z = 0; z < chunkSize; z++) {
@@ -36,69 +38,127 @@ Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain)
 					type = BlockType::STONE;
 				}
 
-				blocks[getBlockIndex(x, y, z)] = type;
-				currentTallestBlock = std::max(currentTallestBlock, y);
+				flat[flatIndex(x, y, z)] = type;
 			}
 		}
 	}
+	buildSections(flat);
 }
 
-Chunk::Chunk(glm::ivec3 position, std::vector<BlockType> savedBlocks)
-	: chunkPosition(position), blocks(std::move(savedBlocks)), modified(true) {
+Chunk::Chunk(glm::ivec3 position, const std::vector<BlockType>& savedBlocks)
+	: chunkPosition(position), modified(true) {
 	// Still modified, if it unloads again it has to be stored again
+	buildSections(savedBlocks);
+}
 
-	// Find the tallest block for frustum culling until the first mesh works it out exactly
-	for (int y = chunkHeight - 1; y >= 0 && currentTallestBlock == 0; y--) {
-		for (int i = 0; i < chunkSize * chunkSize; i++) {
-			if (blocks[getBlockIndex(0, y, 0) + i] != BlockType::AIR) {
-				currentTallestBlock = y;
-				break;
-			}
-		}
+void Chunk::buildSections(const std::vector<BlockType>& flat) {
+	// The flat column and a section use the same y, z, x order, so each section is one contiguous slice
+	for (int s = 0; s < sectionCount; s++) {
+		ChunkSection& section = sections[s];
+		const BlockType* start = &flat[flatIndex(0, s * ChunkSection::size, 0)];
+		section.blocks.assign(start, start + ChunkSection::volume);
+		section.compress();
 	}
 }
 
-ChunkMeshInput Chunk::makeMeshInput(const Chunk* const neighbours[8]) const {
-	constexpr int P = ChunkMeshInput::paddedSize;
-	ChunkMeshInput input;
-	input.blocks.assign(static_cast<size_t>(P) * P * chunkHeight, BlockType::AIR);
-
-	// Find the real tallest block, currentTallestBlock can be stale after edits
-	for (int y = chunkHeight - 1; y >= 0 && input.maxY < 0; y--) {
-		const BlockType* row = &blocks[getBlockIndex(0, y, 0)];
-		for (int i = 0; i < chunkSize * chunkSize; i++) {
-			if (row[i] != BlockType::AIR) { input.maxY = y; break; }
-		}
+std::vector<BlockType> Chunk::flatBlocks() const {
+	std::vector<BlockType> flat(static_cast<size_t>(chunkSize) * chunkHeight * chunkSize);
+	for (int s = 0; s < sectionCount; s++) {
+		const ChunkSection& section = sections[s];
+		BlockType* out = &flat[flatIndex(0, s * ChunkSection::size, 0)];
+		if (section.isUniform()) std::fill(out, out + ChunkSection::volume, section.fill);
+		else std::copy(section.blocks.begin(), section.blocks.end(), out);
 	}
-	if (input.maxY < 0) return input;//empty chunk
+	return flat;
+}
 
-	auto set = [&](int x, int y, int z, BlockType type) {
-		input.blocks[(static_cast<size_t>(y) * P + (z + 1)) * P + (x + 1)] = type;
+// ---------- sections ----------
+
+bool ChunkSection::set(int x, int y, int z, BlockType type) {
+	if (get(x, y, z) == type) return false;
+	if (blocks.empty()) blocks.assign(volume, fill);//first different block, now it needs the full array
+	blocks[index(x, y, z)] = type;
+	return true;
+}
+
+void ChunkSection::compress() {
+	if (blocks.empty()) return;
+	BlockType first = blocks[0];
+	for (BlockType b : blocks) {
+		if (b != first) return;//mixed, keep the array
+	}
+	fill = first;
+	blocks.clear();
+	blocks.shrink_to_fit();//clear alone keeps the memory
+}
+
+// ---------- meshing input ----------
+
+ChunkMeshInput Chunk::makeMeshInput(int sectionIndex, const Chunk* const neighbours[8]) const {
+	constexpr int P = ChunkMeshInput::paddedSize;
+	constexpr int S = ChunkSection::size;
+	ChunkMeshInput input;
+	input.blocks.resize(static_cast<size_t>(P) * P * P);
+
+	// Which column a padded x/z coordinate (-1 to 16) falls in, -1/0/+1 on each axis
+	auto columnAt = [&](int dx, int dz) -> const Chunk* {
+		if (dx == 0 && dz == 0) return this;
+		if (dz == 0) return dx > 0 ? neighbours[0] : neighbours[1];
+		if (dx == 0) return dz > 0 ? neighbours[2] : neighbours[3];
+		if (dx > 0) return dz > 0 ? neighbours[4] : neighbours[5];
+		return dz > 0 ? neighbours[6] : neighbours[7];
 	};
 
-	// Faces only exist up to maxY, and need to see one block above it
-	int copyTop = std::min(input.maxY + 1, chunkHeight - 1);
-	for (int y = 0; y <= copyTop; y++) {
-		for (int z = 0; z < chunkSize; z++) {
-			for (int x = 0; x < chunkSize; x++) {
-				set(x, y, z, blocks[getBlockIndex(x, y, z)]);
+	for (int py = -1; py <= S; py++) {
+		int y = sectionIndex * S + py;
+		for (int pz = -1; pz <= S; pz++) {
+			BlockType* row = &input.blocks[(static_cast<size_t>(py + 1) * P + (pz + 1)) * P];
+			// Above the world is open sky. Below it counts as solid, so the bottom of the world gets no faces nobody can see
+			if (y < 0) { std::fill(row, row + P, BlockType::STONE); continue; }
+			if (y >= chunkHeight) { std::fill(row, row + P, BlockType::AIR); continue; }
+
+			int dz = pz < 0 ? -1 : (pz >= S ? 1 : 0);
+			int localZ = pz - dz * S;
+			int localY = y % S;
+			for (int dx = -1; dx <= 1; dx++) {
+				const Chunk* column = columnAt(dx, dz);
+				// x range this column covers in the padded row: just the edge cell for neighbours, 16 for the middle
+				int first = dx < 0 ? -1 : (dx == 0 ? 0 : S);
+				int count = dx == 0 ? S : 1;
+				BlockType* out = row + (first + 1);
+				if (!column) { std::fill(out, out + count, BlockType::AIR); continue; }//not loaded
+
+				const ChunkSection& section = column->sections[y / S];
+				int localX = first - dx * S;
+				if (section.isUniform()) {
+					std::fill(out, out + count, section.fill);
+				}
+				else {
+					// x is innermost in both, so the row is one copy
+					std::memcpy(out, &section.blocks[ChunkSection::index(localX, localY, localZ)], count * sizeof(BlockType));
+				}
 			}
 		}
-		// Border column from each neighbour, missing neighbours stay air
-		for (int i = 0; i < chunkSize; i++) {
-			if (neighbours[0]) set(chunkSize, y, i, neighbours[0]->getBlock(0, y, i));             // +X
-			if (neighbours[1]) set(-1, y, i, neighbours[1]->getBlock(chunkSize - 1, y, i));        // -X
-			if (neighbours[2]) set(i, y, chunkSize, neighbours[2]->getBlock(i, y, 0));             // +Z
-			if (neighbours[3]) set(i, y, -1, neighbours[3]->getBlock(i, y, chunkSize - 1));        // -Z
-		}
-		// Single corner column from each diagonal neighbour
-		const int last = chunkSize - 1;
-		if (neighbours[4]) set(chunkSize, y, chunkSize, neighbours[4]->getBlock(0, y, 0));    // +X+Z
-		if (neighbours[5]) set(chunkSize, y, -1, neighbours[5]->getBlock(0, y, last));        // +X-Z
-		if (neighbours[6]) set(-1, y, chunkSize, neighbours[6]->getBlock(last, y, 0));        // -X+Z
-		if (neighbours[7]) set(-1, y, -1, neighbours[7]->getBlock(last, y, last));            // -X-Z
 	}
 	return input;
+}
+
+bool Chunk::sectionHasNoFaces(int sectionIndex, const Chunk* const neighbours[8]) const {
+	const ChunkSection& section = sections[sectionIndex];
+	if (section.isEmpty()) return true;//faces belong to solid blocks, air has none
+	if (!section.isUniform()) return false;
+
+	// Solid all the way through: faces only appear where a neighbouring section has an air block against it
+	auto solidSection = [](const Chunk* column, int index) {
+		if (!column) return false;//not loaded counts as air
+		const ChunkSection& other = column->sections[index];
+		return other.isUniform() && other.fill != BlockType::AIR;
+	};
+	bool below = sectionIndex == 0 || solidSection(this, sectionIndex - 1);//below the world counts as solid
+	bool above = sectionIndex + 1 < sectionCount && solidSection(this, sectionIndex + 1);
+	return below && above
+		&& solidSection(neighbours[0], sectionIndex) && solidSection(neighbours[1], sectionIndex)
+		&& solidSection(neighbours[2], sectionIndex) && solidSection(neighbours[3], sectionIndex);
 }
 
 // ---------- greedy meshing ----------
@@ -112,10 +172,59 @@ static int faceIndex(int axis, int direction) {
 	}
 }
 
-static bool isSolid(const ChunkMeshInput& input, const glm::ivec3& p) {
-	if (p.y < 0 || p.y >= Chunk::chunkHeight) return false;
-	return input.get(p.x, p.y, p.z) != BlockType::AIR;
-}
+// The padded input as bits: rows[y + 1][z + 1] has bit x + 1 set when that block is solid
+// One 32 bit row covers the whole x range (-1 to 16), so checking a block is a shift instead of an array lookup,
+// and whole rows can be compared at once to find which slices have any faces at all
+struct SolidRows {
+	static constexpr int P = ChunkMeshInput::paddedSize;
+	static constexpr uint32_t inner = 0x1FFFE;//bits for x = 0 to 15, leaving out the border on each side
+	uint32_t rows[P][P];
+
+	explicit SolidRows(const ChunkMeshInput& input) {
+		for (int y = -1; y <= ChunkSection::size; y++) {
+			for (int z = -1; z <= ChunkSection::size; z++) {
+				uint32_t bits = 0;
+				for (int x = -1; x <= ChunkSection::size; x++) {
+					if (input.get(x, y, z) != BlockType::AIR) bits |= 1u << (x + 1);
+				}
+				rows[y + 1][z + 1] = bits;
+			}
+		}
+	}
+
+	bool operator()(const glm::ivec3& p) const { return (rows[p.y + 1][p.z + 1] >> (p.x + 1)) & 1u; }
+
+	// Bit i set = slice i along this axis has at least one face pointing this direction
+	// A face is a solid block with air next to it, which for a whole row is just `row & ~neighbourRow`
+	uint32_t slicesWithFaces(int axis, int direction) const {
+		const int S = ChunkSection::size;
+		uint32_t slices = 0;
+		if (axis == 0) {
+			// Neighbour along x is in the same row, one bit over
+			uint32_t any = 0;
+			for (int y = 0; y < S; y++) {
+				for (int z = 0; z < S; z++) {
+					uint32_t row = rows[y + 1][z + 1];
+					any |= row & ~(direction > 0 ? row >> 1 : row << 1);
+				}
+			}
+			slices = (any & inner) >> 1;//bit x + 1 -> slice x
+		}
+		else {
+			for (int slice = 0; slice < S; slice++) {
+				uint32_t any = 0;
+				for (int i = 0; i < S && !(any & inner); i++) {
+					// axis 1: slice is y, rows vary in z. axis 2: slice is z, rows vary in y
+					int y = axis == 1 ? slice : i, z = axis == 1 ? i : slice;
+					int ny = axis == 1 ? y + direction : y, nz = axis == 2 ? z + direction : z;
+					any |= rows[y + 1][z + 1] & ~rows[ny + 1][nz + 1];
+				}
+				if (any & inner) slices |= 1u << slice;
+			}
+		}
+		return slices;
+	}
+};
 
 // Ambient occlusion for one corner of a face: 3 = open, 0 = fully tucked into a corner
 // side1/side2 are the blocks along each edge next to the corner, corner is the one diagonally across
@@ -185,11 +294,10 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 
 MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
 	MeshData mesh;
-	mesh.tallestBlock = std::max(input.maxY, 0);
-	if (input.maxY < 0) return mesh;//empty chunk
+	SolidRows solid(input);
 
-	// Area to mesh: the whole chunk on x/z, y only up to the tallest block
-	const int size[3] = { chunkSize, input.maxY + 1, chunkSize };
+	// Area to mesh: one section
+	const int size[3] = { ChunkSection::size, ChunkSection::size, ChunkSection::size };
 	std::vector<uint32_t> mask;
 
 	for (int axis = 0; axis < 3; axis++) {
@@ -204,8 +312,10 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
 		for (int direction = -1; direction <= 1; direction += 2) {
 			int face = faceIndex(axis, direction);
 
-			// One 2D slice of the chunk at a time
+			// One 2D slice of the chunk at a time, skipping slices with nothing to draw (all sky or all rock)
+			uint32_t slicesToMesh = solid.slicesWithFaces(axis, direction);
 			for (int slice = 0; slice < size[axis]; slice++) {
+				if (!(slicesToMesh & (1u << slice))) continue;
 
 				// 1. Build the mask: what face (if any) each cell of this slice shows
 				for (int b = 0; b < size[v]; b++) {
@@ -217,21 +327,21 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
 						pos[axis] = slice;
 						pos[u] = a;
 						pos[v] = b;
-						BlockType type = input.get(pos.x, pos.y, pos.z);
-						if (type == BlockType::AIR) continue;
+						if (!solid(pos)) continue;
 
 						glm::ivec3 front = pos;//the block the face looks into
 						front[axis] += direction;
-						if (isSolid(input, front)) continue;//face is hidden
+						if (solid(front)) continue;//face is hidden
 
 						// Blocks around the face's 4 corners, checked in the layer the face looks into
-						bool uBehind = isSolid(input, front - uStep), uAhead = isSolid(input, front + uStep);
-						bool vBehind = isSolid(input, front - vStep), vAhead = isSolid(input, front + vStep);
-						uint32_t ao00 = vertexAO(uBehind, vBehind, isSolid(input, front - uStep - vStep));
-						uint32_t ao10 = vertexAO(uAhead, vBehind, isSolid(input, front + uStep - vStep));
-						uint32_t ao11 = vertexAO(uAhead, vAhead, isSolid(input, front + uStep + vStep));
-						uint32_t ao01 = vertexAO(uBehind, vAhead, isSolid(input, front - uStep + vStep));
+						bool uBehind = solid(front - uStep), uAhead = solid(front + uStep);
+						bool vBehind = solid(front - vStep), vAhead = solid(front + vStep);
+						uint32_t ao00 = vertexAO(uBehind, vBehind, solid(front - uStep - vStep));
+						uint32_t ao10 = vertexAO(uAhead, vBehind, solid(front + uStep - vStep));
+						uint32_t ao11 = vertexAO(uAhead, vAhead, solid(front + uStep + vStep));
+						uint32_t ao01 = vertexAO(uBehind, vAhead, solid(front - uStep + vStep));
 
+						BlockType type = input.get(pos.x, pos.y, pos.z);
 						uint32_t tile = static_cast<uint32_t>(getBlockTile(type, static_cast<BlockFace>(face)));
 						cell = makeCell(tile, ao00, ao10, ao11, ao01);
 					}
@@ -281,23 +391,16 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
 	return mesh;
 }
 
-void Chunk::setBlock(int x, int y, int z, BlockType type) {
-	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return;//if outside chunk
+bool Chunk::setBlock(int x, int y, int z, BlockType type) {
+	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return false;//if outside chunk
 
-	// Only grow here, the next mesh rebuild works out the exact tallest block
-	if (type != BlockType::AIR)
-		currentTallestBlock = std::max(currentTallestBlock, y);
-
-	blocks[getBlockIndex(x, y, z)] = type;
-	fullRebuildNeeded = true;
+	ChunkSection& section = sections[y / ChunkSection::size];
+	if (!section.set(x, y % ChunkSection::size, z, type)) return false;
+	section.rebuildNeeded = true;
 	modified = true;
+	return true;
 }
 
 BlockType Chunk::getBlock(int x, int y, int z) const {
-	return blocks[getBlockIndex(x, y, z)];
-}
-
-// Helper to get the index in the 1D array from 3D coordinates
-size_t Chunk::getBlockIndex(int x, int y, int z) const {
-	return (static_cast<size_t>(y) * chunkSize * chunkSize) + (z * chunkSize) + x;
+	return sections[y / ChunkSection::size].get(x, y % ChunkSection::size, z);
 }

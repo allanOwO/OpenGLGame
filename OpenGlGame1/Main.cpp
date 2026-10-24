@@ -471,7 +471,7 @@ void Main::run() {
         lastFrameTimes.gpuShadowMs = renderer->getGpuShadowMs();
         if (world) {
             debugOverlay.recordFrame(lastFrameTimes);
-            if (benchmark) benchmark->recordFrame(lastFrameTimes, renderer->getStats());
+            if (benchmark) benchmark->recordFrame(lastFrameTimes, renderer->getStats(), world->getUpdateTimes());
         }
         lastFrameTimes = FrameTimes();
 

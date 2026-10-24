@@ -39,11 +39,22 @@ struct JobTotals {
 	}
 };
 
+// How long each part of the last World::update took, to find which one causes a slow frame
+struct UpdateTimes {
+	float areaMs = 0.0f;//player changed chunk: active flags, unloading, where loading resumes
+	float applyMs = 0.0f;//adding finished chunks to the world
+	float loadMs = 0.0f;//starting generation jobs
+	float uploadMs = 0.0f;//copying finished meshes to the GPU
+	float launchMs = 0.0f;//choosing chunks to mesh and copying their blocks for the workers
+};
+
 // What the renderer drew last frame
 struct RenderStats {
-	int chunksDrawn = 0;
-	int chunksCulled = 0;//outside the camera frustum
-	int drawCalls = 0;//main pass only
+	int sectionsDrawn = 0;
+	int sectionsCulled = 0;//outside the camera frustum, tested one by one
+	int regionsCulled = 0;//whole 8x8 column regions outside the frustum, their sections weren't tested at all
+	int drawCalls = 0;//main pass only, 1 since everything goes in one multi draw
+	int drawCommands = 0;//draws inside that call, one per visible section
 	int64_t triangles = 0;
 	int shadowDrawCalls = 0;
 	int64_t shadowTriangles = 0;

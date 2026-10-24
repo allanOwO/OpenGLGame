@@ -29,7 +29,7 @@ public:
 
 	// Call once per frame before World::update with the length of the frame that just finished
 	// times/render describe that same frame
-	void recordFrame(const FrameTimes& times, const RenderStats& render);
+	void recordFrame(const FrameTimes& times, const RenderStats& render, const UpdateTimes& parts);
 	void update(World& world, double deltaSeconds);
 
 	bool isFinished() const { return phase == Phase::Done; }
@@ -56,6 +56,8 @@ private:
 	// Everything measured during one phase
 	struct PhaseRecord {
 		std::vector<float> frameMs;
+		std::vector<float> updateList, renderList, gpuList;//every frame's parts, for the slowest 1% table
+		std::vector<UpdateTimes> updateParts;
 		double updateMs = 0.0, renderMs = 0.0, gpuMs = 0.0, gpuShadowMs = 0.0;
 		int64_t triangles = 0, drawCalls = 0;
 		double seconds = 0.0;
