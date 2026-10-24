@@ -160,6 +160,8 @@
     <ClCompile Include="Menu.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="WorldSave.cpp" />
+    <ClCompile Include="DebugOverlay.cpp" />
+    <ClCompile Include="Benchmark.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockConstants.h" />
@@ -184,6 +186,9 @@
     <ClInclude Include="Settings.h" />
     <ClInclude Include="WorldSave.h" />
     <ClInclude Include="FileUtil.h" />
+    <ClInclude Include="DebugStats.h" />
+    <ClInclude Include="DebugOverlay.h" />
+    <ClInclude Include="Benchmark.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\ResourceFiles\depth_fragment.glsl" />

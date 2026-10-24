@@ -67,15 +67,16 @@ Chunk::~Chunk() {
 
 Chunk::Chunk(Chunk&& other) noexcept
 	: currentTallestBlock(other.currentTallestBlock), isActive(other.isActive),
-	VBO(other.VBO), VAO(other.VAO), EBO(other.EBO), indexCount(other.indexCount),
+	VBO(other.VBO), VAO(other.VAO), EBO(other.EBO), indexCount(other.indexCount), meshBytes(other.meshBytes),
 	chunkPosition(other.chunkPosition), blocks(std::move(other.blocks)),
-	fullRebuildNeeded(other.fullRebuildNeeded), modified(other.modified)
+	fullRebuildNeeded(other.fullRebuildNeeded), modified(other.modified), pendingEditTime(other.pendingEditTime)
 {
 	// Reset the other object's buffer IDs to prevent double deletion
 	other.VAO = 0;
 	other.VBO = 0;
 	other.EBO = 0;
 	other.indexCount = 0;
+	other.meshBytes = 0;
 }
 
 Chunk& Chunk::operator=(Chunk&& other) noexcept {
@@ -88,15 +89,18 @@ Chunk& Chunk::operator=(Chunk&& other) noexcept {
 		VAO = other.VAO;
 		EBO = other.EBO;
 		indexCount = other.indexCount;
+		meshBytes = other.meshBytes;
 		chunkPosition = other.chunkPosition;
 		blocks = std::move(other.blocks);
 		fullRebuildNeeded = other.fullRebuildNeeded;
 		modified = other.modified;
+		pendingEditTime = other.pendingEditTime;
 
 		other.VAO = 0;
 		other.VBO = 0;
 		other.EBO = 0;
 		other.indexCount = 0;
+		other.meshBytes = 0;
 	}
 	return *this;
 }
@@ -107,6 +111,7 @@ void Chunk::releaseBuffers() {
 	if (EBO != 0) glDeleteBuffers(1, &EBO);
 	VAO = VBO = EBO = 0;
 	indexCount = 0;
+	meshBytes = 0;
 }
 
 void Chunk::initializeBuffers() {
@@ -151,6 +156,7 @@ void Chunk::uploadMesh(const MeshData& mesh) {
 	glBindVertexArray(0);
 
 	indexCount = static_cast<GLsizei>(mesh.indices.size());
+	meshBytes = mesh.vertices.size() * sizeof(PackedVertex) + mesh.indices.size() * sizeof(unsigned int);
 	currentTallestBlock = mesh.tallestBlock;
 }
 

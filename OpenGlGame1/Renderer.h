@@ -5,6 +5,7 @@
 
 #include "Shader.h"
 #include "Frustum.h"
+#include "DebugStats.h"
 
 class World;
 struct RaycastHit;
@@ -23,6 +24,9 @@ public:
 	// farPlane should reach past the furthest loaded chunk or the edge of the world gets cut off
 	void render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
 		int width, int height, float time, float farPlane, const RaycastHit* highlight);
+
+	const RenderStats& getStats() const { return stats; }//counts from the last render()
+	float getGpuMs() const { return gpuMs; }//GPU time of a recent render(), a few frames behind
 
 private:
 	void createShaders();
@@ -55,6 +59,15 @@ private:
 	GLuint texAtlas = 0;
 
 	Frustum frustum;
+	RenderStats stats;
+
+	// GPU timing: the GPU runs behind the CPU, so asking for a query's result straight away would stall until it catches up
+	// Instead several queries take turns and each one is read a few frames later when it's ready
+	static const int GPU_QUERY_COUNT = 4;
+	GLuint gpuQueries[GPU_QUERY_COUNT] = {};
+	bool gpuQueryStarted[GPU_QUERY_COUNT] = {};
+	int gpuQueryIndex = 0;
+	float gpuMs = 0.0f;
 	glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, -1.0f);//directional light
 
 	// shadow stuff

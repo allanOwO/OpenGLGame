@@ -11,7 +11,8 @@ enum class MenuScreen {
 	WorldSelect,
 	CreateWorld,
 	Settings,
-	Pause
+	Pause,
+	BenchmarkResults
 };
 
 // What the player asked for this frame, Main carries it out
@@ -25,7 +26,8 @@ struct MenuAction {
 		SaveWorld,
 		SaveAndExitToTitle,
 		SaveAndQuit,
-		SettingsChanged
+		SettingsChanged,
+		StartBenchmark
 	};
 	Type type = Type::None;
 	std::string worldName;
@@ -44,6 +46,7 @@ public:
 
 	void goBack();//Escape key: closes the pause menu, or returns to the previous screen
 	void showMessage(const std::string& text, float seconds = 3.0f);//shown under the buttons
+	void showBenchmarkResults(const std::vector<std::string>& lines);//opens the results screen
 
 	MenuAction draw(UI& ui, Settings& settings, float time);
 
@@ -56,6 +59,7 @@ private:
 	MenuAction drawCreateWorld(UI& ui);
 	MenuAction drawSettings(UI& ui, Settings& settings);
 	MenuAction drawPause(UI& ui);
+	MenuAction drawBenchmarkResults(UI& ui);
 	void drawMessage(UI& ui, float y);
 
 	MenuScreen screen = MenuScreen::Title;
@@ -68,6 +72,8 @@ private:
 
 	std::string newWorldName;
 	std::string newWorldSeed;
+
+	std::vector<std::string> benchmarkLines;
 
 	std::string message;
 	float messageUntil = 0.0f;

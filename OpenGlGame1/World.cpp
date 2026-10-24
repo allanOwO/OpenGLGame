@@ -29,6 +29,31 @@ bool World::isLoadedAt(const glm::vec3& worldPos) const {
     return findChunk(chunkX, chunkZ) != nullptr;
 }
 
+bool World::isFullyLoaded() const {
+    if (isInitialLoading || !chunkGenerationFutures.empty() || !chunkMeshFutures.empty()) return false;
+    for (const auto& pair : chunks) {
+        if (pair.second.isActive && pair.second.fullRebuildNeeded) return false;
+    }
+    return true;
+}
+
+WorldStats World::getStats() const {
+    WorldStats stats;
+    stats.chunksLoaded = static_cast<int>(chunks.size());
+    stats.generationJobs = static_cast<int>(chunkGenerationFutures.size());
+    stats.meshJobs = static_cast<int>(chunkMeshFutures.size());
+    stats.generation = JobTotals::of(generationTimer);
+    stats.meshing = JobTotals::of(meshTimer);
+    stats.editLatency = JobTotals::of(editLatencyTimer);
+    for (const auto& pair : chunks) {
+        const Chunk& chunk = pair.second;
+        if (chunk.isActive) stats.chunksActive++;
+        stats.blockBytes += chunk.blocks.capacity() * sizeof(BlockType);
+        stats.meshBytes += chunk.meshBytes;
+    }
+    return stats;
+}
+
 // ---------- saving ----------
 
 bool World::saveChunks(const std::string& path) {
@@ -144,20 +169,26 @@ void World::generateChunkAsync(int chunkX, int chunkZ) {
     uint64_t key = getChunkKey(chunkX, chunkZ);
     glm::ivec3 position(chunkX * Chunk::chunkSize, -Chunk::baseTerrainHeight, chunkZ * Chunk::chunkSize);
     const TerrainGenerator* terrainPtr = &terrain;//worker only reads it
+    JobTimer* timer = &generationTimer;//atomic, and World waits for every job before it's destroyed
 
     // If the player changed this chunk before, rebuild it from the stored blocks instead of the noise
     std::vector<uint8_t> savedData;
     storage.take(key, savedData);//leaves savedData empty if there's nothing stored
 
-    chunkGenerationFutures[key] = std::async(std::launch::async, [terrainPtr, position, savedData = std::move(savedData)]() {
+    chunkGenerationFutures[key] = std::async(std::launch::async, [terrainPtr, timer, position, savedData = std::move(savedData)]() {
+        double start = nowSeconds();
         if (!savedData.empty()) {
             std::vector<BlockType> blocks;
             if (decodeBlocks(savedData, static_cast<size_t>(Chunk::chunkSize) * Chunk::chunkHeight * Chunk::chunkSize, blocks)) {
-                return Chunk(position, std::move(blocks));
+                Chunk chunk(position, std::move(blocks));
+                timer->add(nowSeconds() - start);
+                return chunk;
             }
             std::cerr << "Stored chunk at " << position.x << ", " << position.z << " is corrupt, regenerating it" << std::endl;
         }
-        return Chunk(position, *terrainPtr);
+        Chunk chunk(position, *terrainPtr);
+        timer->add(nowSeconds() - start);
+        return chunk;
         });
 }
 
@@ -238,22 +269,32 @@ void World::launchChunkMesh(uint64_t key, Chunk& chunk) {
     // Cleared before the job runs, so edits made while it runs queue another rebuild
     chunk.fullRebuildNeeded = false;
 
-    chunkMeshFutures[key] = std::async(std::launch::async, [input = std::move(input)]() {
-        return Chunk::buildMesh(input);
+    MeshJob& job = chunkMeshFutures[key];
+    job.editTime = chunk.pendingEditTime;//this job's copy includes that edit
+    chunk.pendingEditTime = -1.0;
+    JobTimer* timer = &meshTimer;
+    job.future = std::async(std::launch::async, [input = std::move(input), timer]() {
+        double start = nowSeconds();
+        MeshData mesh = Chunk::buildMesh(input);
+        timer->add(nowSeconds() - start);
+        return mesh;
         });
 }
 
 void World::processChunkMeshing(const glm::vec3& playerPosition) {
     // Upload finished meshes
     for (auto it = chunkMeshFutures.begin(); it != chunkMeshFutures.end();) {
-        if (it->second.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        MeshJob& job = it->second;
+        if (job.future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
             ++it;
             continue;
         }
 
-        MeshData mesh = it->second.get();
+        MeshData mesh = job.future.get();
         if (Chunk* chunk = findChunk(chunkKeyX(it->first), chunkKeyZ(it->first))) {
             chunk->uploadMesh(mesh);
+            // The edit is on screen from the next frame
+            if (job.editTime >= 0.0) editLatencyTimer.add(nowSeconds() - job.editTime);
         }// else the chunk was unloaded while meshing
         it = chunkMeshFutures.erase(it);
     }
@@ -317,6 +358,7 @@ void World::setBlock(const glm::ivec3& worldPos, BlockType type) {
     int localX = worldPos.x - chunkX * Chunk::chunkSize;
     int localZ = worldPos.z - chunkZ * Chunk::chunkSize;
     chunk->setBlock(localX, localY, localZ, type);
+    if (chunk->pendingEditTime < 0.0) chunk->pendingEditTime = nowSeconds();
 
     // Blocks on the edge change the neighbour's visible faces and ambient occlusion too
     auto rebuild = [this](int x, int z) {

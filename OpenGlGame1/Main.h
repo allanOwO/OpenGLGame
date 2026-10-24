@@ -12,6 +12,8 @@
 #include "Menu.h"
 #include "Settings.h"
 #include "WorldSave.h"
+#include "DebugOverlay.h"
+#include "Benchmark.h"
 
 // The application: owns the window, the game loop and input, and ties World, Player, Renderer and the menus together
 // States: no world (title menus) -> playing -> paused (world still drawn, menu on top)
@@ -22,6 +24,7 @@ public:
 	~Main();
 
 	void run();
+	void runBenchmarkAndQuit();//for the --benchmark command line flag, call before run()
 
 private:
 	void init(); // Initialize GLFW, GLAD, etc.
@@ -37,11 +40,15 @@ private:
 	bool saveWorld();
 	void unloadWorld();
 
+	// benchmark, runs in its own throwaway world that is never saved
+	void startBenchmark();
+	void finishBenchmark();
+
 	// menus
 	void handleMenuAction(const MenuAction& action);
 	void handleEscape();
 	void updateCursorMode();
-	void drawCrosshair(const UIInput& input);
+	void drawHud(const UIInput& input);//crosshair, debug overlay, benchmark progress
 
 	void doFps();
 
@@ -66,6 +73,11 @@ private:
 	std::unique_ptr<World> world;
 	std::unique_ptr<Player> player;
 	WorldInfo currentWorld;
+	std::unique_ptr<Benchmark> benchmark;//while it exists the benchmark drives the camera instead of the player
+	bool quitAfterBenchmark = false;
+
+	DebugOverlay debugOverlay;
+	FrameTimes lastFrameTimes;//measured during the previous frame, recorded at the start of the next one
 
 	Menu menu;
 	Settings settings;
@@ -88,5 +100,6 @@ private:
 	int frameCount = 0;        // Number of frames since last update
 	float fps = 0.0f;          // Current FPS value
 	float lastFrame = 0.0f; // Time of last frame
+	double lastFrameStart = 0.0;//nowSeconds(), double so frame times stay precise however long the game runs
 	float physicsAccumulator = 0.0f; // Frame time not yet used by a physics step
 };

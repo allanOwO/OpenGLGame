@@ -19,7 +19,7 @@ Main::Main() {
 
 Main::~Main() {
     // Closing the window while playing shouldn't lose anything
-    if (world) saveWorld();
+    if (world && !benchmark) saveWorld();
     if (settingsDirty) settings.save(SETTINGS_FILE);
 
     // Order matters: these delete GL objects, so they go before the window/context
@@ -89,6 +89,9 @@ void Main::keyCallback(GLFWwindow* window, int key, int scancode, int action, in
     }
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         main->escapePressed = true;
+    }
+    if (key == GLFW_KEY_F3 && action == GLFW_PRESS) {
+        main->debugOverlay.toggle();
     }
 }
 
@@ -269,9 +272,37 @@ bool Main::saveWorld() {
 }
 
 void Main::unloadWorld() {
+    benchmark.reset();
     player.reset();
     world.reset();
     hasTarget = false;
+}
+
+// ---------- benchmark ----------
+
+void Main::startBenchmark() {
+    unloadWorld();
+    std::cout << "Starting benchmark, render distance " << settings.renderDistance << std::endl;
+
+    // A fresh world every run, nothing is loaded from or saved to disk so runs can't affect each other
+    world = std::make_unique<World>(Benchmark::seed, settings.renderDistance);
+    player = std::make_unique<Player>(window);//not moved, but the rest of Main expects one alongside a world
+    benchmark = std::make_unique<Benchmark>(*world, width, height);
+
+    hasTarget = false;
+    menu.close();
+}
+
+void Main::finishBenchmark() {
+    std::vector<std::string> results = benchmark->finish();
+    unloadWorld();
+    menu.showBenchmarkResults(results);
+    if (quitAfterBenchmark) glfwSetWindowShouldClose(window, true);
+}
+
+void Main::runBenchmarkAndQuit() {
+    quitAfterBenchmark = true;
+    startBenchmark();
 }
 
 // ---------- menus ----------
@@ -329,6 +360,10 @@ void Main::handleMenuAction(const MenuAction& action) {
         glfwSetWindowShouldClose(window, true);
         break;
 
+    case Type::StartBenchmark:
+        startBenchmark();
+        break;
+
     case Type::SettingsChanged:
         if (world) world->setRenderDistance(settings.renderDistance);
         settingsDirty = true;
@@ -340,7 +375,12 @@ void Main::handleMenuAction(const MenuAction& action) {
 }
 
 void Main::handleEscape() {
-    if (world && !menu.isOpen()) menu.open(MenuScreen::Pause);
+    if (benchmark) {
+        unloadWorld();
+        menu.open(MenuScreen::Title);
+        menu.showMessage("BENCHMARK CANCELLED");
+    }
+    else if (world && !menu.isOpen()) menu.open(MenuScreen::Pause);
     else menu.goBack();
 }
 
@@ -357,13 +397,27 @@ void Main::updateCursorMode() {
     }
 }
 
-void Main::drawCrosshair(const UIInput& input) {
+void Main::drawHud(const UIInput& input) {
     ui->beginFrame(input, width, height);
     float s = static_cast<float>(ui->scale());
-    float cx = std::round(width * 0.5f), cy = std::round(height * 0.5f);
-    glm::vec4 colour(1.0f, 1.0f, 1.0f, 0.8f);
-    ui->panel(cx - 5 * s, cy - s * 0.5f, 10 * s, s, colour);
-    ui->panel(cx - s * 0.5f, cy - 5 * s, s, 10 * s, colour);
+
+    if (benchmark) {
+        debugOverlay.draw(*ui, *world, *renderer, benchmark->cameraPos(), benchmark->cameraFront(), benchmark->getYaw(), benchmark->getPitch());
+        // Progress along the bottom, out of the way of the overlay
+        std::string status = benchmark->status();
+        float textW = UIRenderer::textWidth(status, ui->scale());
+        float textH = UIRenderer::textHeight(ui->scale());
+        float x = std::round((width - textW) * 0.5f), y = height - textH - 8 * s;
+        ui->panel(x - 3 * s, y - 3 * s, textW + 6 * s, textH + 6 * s, glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
+        ui->label(status, x, y, ui->scale(), glm::vec4(1.0f, 0.85f, 0.4f, 1.0f));
+    }
+    else {
+        float cx = std::round(width * 0.5f), cy = std::round(height * 0.5f);
+        glm::vec4 colour(1.0f, 1.0f, 1.0f, 0.8f);
+        ui->panel(cx - 5 * s, cy - s * 0.5f, 10 * s, s, colour);
+        ui->panel(cx - s * 0.5f, cy - 5 * s, s, 10 * s, colour);
+        debugOverlay.draw(*ui, *world, *renderer, player->getCameraPos(), player->getCameraFront(), player->getYaw(), player->getPitch());
+    }
     ui->endFrame();
 }
 
@@ -393,6 +447,7 @@ void Main::doFps() {
 void Main::run() {
 
     lastFrame = glfwGetTime();
+    lastFrameStart = nowSeconds();
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
@@ -400,6 +455,18 @@ void Main::run() {
         float currentFrame = glfwGetTime();
         float deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+
+        // The frame that just ended is complete now, hand its times to whoever is measuring
+        double frameStart = nowSeconds();
+        double frameSeconds = frameStart - lastFrameStart;
+        lastFrameStart = frameStart;
+        lastFrameTimes.frameMs = static_cast<float>(frameSeconds * 1000.0);
+        lastFrameTimes.gpuMs = renderer->getGpuMs();
+        if (world) {
+            debugOverlay.recordFrame(lastFrameTimes);
+            if (benchmark) benchmark->recordFrame(lastFrameTimes, renderer->getStats());
+        }
+        lastFrameTimes = FrameTimes();
 
         // Cap deltaTime so a long stall (window drag, breakpoint, saving) doesn't run hundreds of physics steps
         const float maxDeltaTime = 0.25f;
@@ -419,20 +486,43 @@ void Main::run() {
             handleEscape();
         }
 
-        bool playing = world && !menu.isOpen();
+        if (benchmark && benchmark->isFinished()) {
+            finishBenchmark();
+        }
+
+        bool playing = world && !menu.isOpen() && !benchmark;
+        double updateStart = nowSeconds();
         if (playing) {
             updateGame(deltaTime);
         }
-        if (world) {
-            // Keeps loading chunks while paused, so the world is ready when you resume
-            world->update(player->getCameraPos());
+
+        // The benchmark flies its own camera, otherwise it's the player's
+        glm::vec3 cameraPos(0.0f);
+        glm::mat4 view(1.0f);
+        float sunTime = currentFrame;
+        if (benchmark) {
+            benchmark->update(*world, frameSeconds);//uncapped, so the path takes the same real time on any machine
+            cameraPos = benchmark->cameraPos();
+            view = benchmark->viewMatrix();
+            sunTime = Benchmark::sunTime;
+        }
+        else if (world) {
+            cameraPos = player->getCameraPos();
+            view = player->getViewMatrix();
         }
 
+        if (world) {
+            // Keeps loading chunks while paused, so the world is ready when you resume
+            world->update(cameraPos);
+        }
+        lastFrameTimes.updateMs = static_cast<float>((nowSeconds() - updateStart) * 1000.0);
+
         // 3D world, or a plain background on the title screens
+        double renderStart = nowSeconds();
         if (world) {
             float farPlane = (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f;
-            renderer->render(*world, player->getCameraPos(), player->getViewMatrix(),
-                width, height, currentFrame, farPlane, playing && hasTarget ? &target : nullptr);
+            renderer->render(*world, cameraPos, view,
+                width, height, sunTime, farPlane, playing && hasTarget ? &target : nullptr);
         }
         else {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -440,6 +530,7 @@ void Main::run() {
             glClearColor(0.08f, 0.10f, 0.14f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
+        lastFrameTimes.renderMs = static_cast<float>((nowSeconds() - renderStart) * 1000.0);
 
         // UI on top
         if (menu.isOpen()) {
@@ -449,7 +540,7 @@ void Main::run() {
             handleMenuAction(action);
         }
         else if (world) {
-            drawCrosshair(input);
+            drawHud(input);
         }
 
         // Settings are written once you leave the settings screen, not on every slider step
@@ -473,9 +564,13 @@ void Main::run() {
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
     Main main;
+    // "OpenGlGame1.exe --benchmark" runs the benchmark straight away and closes when it's done
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--benchmark") main.runBenchmarkAndQuit();
+    }
 
     main.run();
 

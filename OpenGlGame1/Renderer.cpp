@@ -17,6 +17,7 @@ Renderer::Renderer() {
     loadTextures();
     createShaders();
     createHighlight();
+    glGenQueries(GPU_QUERY_COUNT, gpuQueries);
 }
 
 Renderer::~Renderer() {
@@ -30,6 +31,7 @@ Renderer::~Renderer() {
     glDeleteTextures(1, &texAtlas);
     glDeleteTextures(1, &depthMap);
     glDeleteFramebuffers(1, &depthMapFBO);
+    glDeleteQueries(GPU_QUERY_COUNT, gpuQueries);
 }
 
 // ---------- setup ----------
@@ -197,6 +199,23 @@ void Renderer::createHighlight() {
 void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
     int width, int height, float time, float farPlane, const RaycastHit* highlight) {
 
+    // The query being reused was started GPU_QUERY_COUNT frames ago, read it if the GPU has finished it
+    GLuint query = gpuQueries[gpuQueryIndex];
+    if (gpuQueryStarted[gpuQueryIndex]) {
+        GLint available = 0;
+        glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+        if (available) {
+            GLuint64 nanoseconds = 0;
+            glGetQueryObjectui64v(query, GL_QUERY_RESULT, &nanoseconds);
+            gpuMs = static_cast<float>(nanoseconds / 1'000'000.0);
+        }
+    }
+    glBeginQuery(GL_TIME_ELAPSED, query);
+    gpuQueryStarted[gpuQueryIndex] = true;
+    gpuQueryIndex = (gpuQueryIndex + 1) % GPU_QUERY_COUNT;
+
+    stats = RenderStats();
+
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, farPlane);
 
     //whats in current view
@@ -257,6 +276,7 @@ void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm:
     }
 
     renderSun(view, projection, -sunDirection, cameraPos);
+    glEndQuery(GL_TIME_ELAPSED);
 }
 
 void Renderer::renderShadowMap(const World& world) {
@@ -286,6 +306,8 @@ void Renderer::renderShadowMap(const World& world) {
         glUniformMatrix4fv(depthModelLoc, 1, GL_FALSE, glm::value_ptr(model));
         glBindVertexArray(chunk.VAO);
         glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
+        stats.shadowDrawCalls++;
+        stats.shadowTriangles += chunk.indexCount / 3;
     }
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -309,6 +331,7 @@ void Renderer::drawChunks(const World& world) {
         glm::vec3 min = pos;
         glm::vec3 max = pos + glm::vec3(Chunk::chunkSize, chunk.currentTallestBlock + 1, Chunk::chunkSize);
         if (!frustum.isBoxInFrustum(min, max)) {
+            stats.chunksCulled++;
             continue; // Skip chunks outside the frustum
         }
 
@@ -318,6 +341,9 @@ void Renderer::drawChunks(const World& world) {
         // whole chunk is one buffer, all blocks share the atlas
         glBindVertexArray(chunk.VAO);
         glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
+        stats.chunksDrawn++;
+        stats.drawCalls++;
+        stats.triangles += chunk.indexCount / 3;
     }
     glBindVertexArray(0);
 }

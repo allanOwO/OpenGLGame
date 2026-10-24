@@ -48,6 +48,7 @@ void Menu::goBack() {
 	case MenuScreen::CreateWorld: open(MenuScreen::WorldSelect); break;
 	case MenuScreen::Settings: open(settingsReturnTo); break;
 	case MenuScreen::Pause: close(); break;
+	case MenuScreen::BenchmarkResults: open(MenuScreen::Title); break;
 	default: break;//nothing behind the title screen
 	}
 }
@@ -55,6 +56,11 @@ void Menu::goBack() {
 void Menu::showMessage(const std::string& text, float seconds) {
 	message = text;
 	messageUntil = now + seconds;
+}
+
+void Menu::showBenchmarkResults(const std::vector<std::string>& lines) {
+	benchmarkLines = lines;
+	open(MenuScreen::BenchmarkResults);
 }
 
 bool Menu::parseSeed(const std::string& text, int& seed) {
@@ -86,6 +92,7 @@ MenuAction Menu::draw(UI& ui, Settings& settings, float time) {
 	case MenuScreen::CreateWorld: return drawCreateWorld(ui);
 	case MenuScreen::Settings: return drawSettings(ui, settings);
 	case MenuScreen::Pause: return drawPause(ui);
+	case MenuScreen::BenchmarkResults: return drawBenchmarkResults(ui);
 	default: return {};
 	}
 }
@@ -112,6 +119,8 @@ MenuAction Menu::drawTitle(UI& ui) {
 		settingsReturnTo = MenuScreen::Title;
 		open(MenuScreen::Settings);
 	}
+	y += l.buttonH + l.gap;
+	if (ui.button("BENCHMARK", l.left(), y, l.buttonW, l.buttonH)) action.type = MenuAction::Type::StartBenchmark;
 	y += l.buttonH + l.gap;
 	if (ui.button("QUIT", l.left(), y, l.buttonW, l.buttonH)) action.type = MenuAction::Type::Quit;
 	y += l.buttonH + l.gap * 2;
@@ -265,5 +274,32 @@ MenuAction Menu::drawPause(UI& ui) {
 	y += l.buttonH + l.gap * 2;
 
 	drawMessage(ui, y);
+	return action;
+}
+
+MenuAction Menu::drawBenchmarkResults(UI& ui) {
+	Layout l(ui);
+	MenuAction action;
+
+	float y = ui.screenHeight() * 0.12f;
+	ui.labelCentered("BENCHMARK RESULTS", l.centreX, y, ui.scale() * 2, white);
+	y += UIRenderer::textHeight(ui.scale() * 2) + l.gap * 4;
+
+	// Smaller text, the lines are long and left aligned so the columns of numbers line up
+	int textScale = std::max(1, ui.scale() - 1);
+	float widest = 0.0f;
+	for (const std::string& line : benchmarkLines) widest = std::max(widest, UIRenderer::textWidth(line, textScale));
+	float x = std::max(l.gap, l.centreX - widest * 0.5f);
+	float lineH = UIRenderer::textHeight(textScale) + 4.0f * textScale;
+	ui.panel(x - l.gap, y - l.gap, widest + l.gap * 2, lineH * benchmarkLines.size() + l.gap * 2, listBackground);
+	for (const std::string& line : benchmarkLines) {
+		ui.label(line, x, y, textScale, white);
+		y += lineH;
+	}
+	y += l.gap * 4;
+
+	if (ui.button("RUN AGAIN", l.left(), y, l.buttonW, l.buttonH)) action.type = MenuAction::Type::StartBenchmark;
+	y += l.buttonH + l.gap;
+	if (ui.button("BACK", l.left(), y, l.buttonW, l.buttonH)) open(MenuScreen::Title);
 	return action;
 }

@@ -1,0 +1,3 @@
+date,build,gpu,width,height,render_distance,load_s,load_chunks,generate_ms,mesh_ms,spin_fps,spin_1pct_low,spin_cpu_ms,spin_gpu_ms,flight_fps,flight_1pct_low,flight_worst_ms,streamed_chunks_per_s,edit_to_screen_ms,edit_fps,triangles,draw_calls,block_mb,mesh_mb
+2026-10-24 21:58:21,RELEASE,"AMD Radeon RX 9060 XT",1920,1080,64,47.89,16641,0.119,2.412,107.7,82.3,5.351,7.652,125.1,79.4,18.91,122.6,9.93,143.9,1649535,5839,936.4,177.2
+2026-10-24 22:00:14,RELEASE,"AMD Radeon RX 9060 XT",1920,1080,64,59.61,16641,0.137,2.497,65.5,43.1,10.725,12.408,98.1,46.9,39.59,96.6,9.86,148.9,1648517,5835,905.7,171.3

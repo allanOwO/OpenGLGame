@@ -9,6 +9,7 @@
 #include "MeshData.h"
 #include "TerrainGenerator.h"
 #include "ChunkStorage.h"
+#include "DebugStats.h"
 
 // Result of World::raycast
 struct RaycastHit {
@@ -47,6 +48,10 @@ public:
 	// True once the chunk under this world position is loaded, so physics doesn't drop the player through it
 	bool isLoadedAt(const glm::vec3& worldPos) const;
 
+	// Every chunk in render distance is generated and meshed, and no jobs are running (benchmark waits for this)
+	bool isFullyLoaded() const;
+	WorldStats getStats() const;//for the debug overlay and benchmark
+
 	// Saving: writes every modified chunk (loaded or not) to one file
 	bool saveChunks(const std::string& path);
 	// Loading: call before the first update, chunks then come from the file instead of the noise as they load
@@ -75,9 +80,20 @@ private:
 	//only touched on the main thread, worker threads get copies (see ChunkMeshInput)
 	std::unordered_map<uint64_t, Chunk> chunks;
 
+	// A mesh being built on a worker, editTime is the edit it includes (-1 if it was not started by an edit)
+	struct MeshJob {
+		std::future<MeshData> future;
+		double editTime = -1.0;
+	};
+
 	//async tasks for each chunk, keyed by chunk key
 	std::unordered_map<uint64_t, std::future<Chunk>> chunkGenerationFutures;
-	std::unordered_map<uint64_t, std::future<MeshData>> chunkMeshFutures;
+	std::unordered_map<uint64_t, MeshJob> chunkMeshFutures;
+
+	// Timings for the debug overlay, workers add to the first two so they're atomic
+	JobTimer generationTimer;
+	JobTimer meshTimer;
+	JobTimer editLatencyTimer;
 
 	int renderDistance;//in chunks
 	bool isInitialLoading = true; // Flag to track initial loading phase

@@ -47,11 +47,13 @@ public:
 
 	unsigned int VBO = 0, VAO = 0, EBO = 0;
 	GLsizei indexCount = 0;
+	size_t meshBytes = 0;//vertex + index buffer size on the GPU, for the debug overlay
 	glm::vec3 chunkPosition;
 
 	std::vector<BlockType> blocks;//dense array, uses more ram, quicker lookup
 	bool fullRebuildNeeded = true;
 	bool modified = false;//player changed a block, so it must be kept when unloaded (it can't be regenerated)
+	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
 
 private:
 	void releaseBuffers();
