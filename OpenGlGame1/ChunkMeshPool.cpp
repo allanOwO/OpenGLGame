@@ -81,7 +81,7 @@ void ChunkMeshPool::free(int page, GLint start, GLsizei vertices) {
 	}
 }
 
-void ChunkMeshPool::upload(MeshAllocation& allocation, const std::vector<PackedVertex>& vertices) {
+void ChunkMeshPool::upload(MeshAllocation& allocation, const std::vector<PackedVertex>& vertices, const int groupCounts[faceGroupCount]) {
 	GLsizei count = static_cast<GLsizei>(vertices.size());
 	if (count == 0) {
 		release(allocation);//all air, nothing to draw
@@ -95,6 +95,7 @@ void ChunkMeshPool::upload(MeshAllocation& allocation, const std::vector<PackedV
 	}
 	usedVertices += count - allocation.vertexCount;
 	allocation.vertexCount = count;
+	for (int g = 0; g < faceGroupCount; g++) allocation.groupCounts[g] = groupCounts[g];
 
 	// COPY_WRITE target so the upload doesn't disturb any VAO's bindings
 	glBindBuffer(GL_COPY_WRITE_BUFFER, pages[allocation.page].buffer);
@@ -102,7 +103,7 @@ void ChunkMeshPool::upload(MeshAllocation& allocation, const std::vector<PackedV
 		static_cast<GLsizeiptr>(count) * sizeof(PackedVertex), vertices.data());
 }
 
-void ChunkMeshPool::combine(MeshAllocation& target, const std::vector<MeshRange>& parts) {
+void ChunkMeshPool::combine(MeshAllocation& target, const std::vector<MeshRange>& parts, const GLsizei groupCounts[faceGroupCount]) {
 	GLsizei total = 0;
 	for (const MeshRange& part : parts) total += part.count;
 	if (total == 0) {
@@ -114,6 +115,7 @@ void ChunkMeshPool::combine(MeshAllocation& target, const std::vector<MeshRange>
 	// A new range, no slack: merged meshes are rebuilt whole, never edited in place
 	MeshAllocation combined = allocate(total);
 	combined.vertexCount = total;
+	for (int g = 0; g < faceGroupCount; g++) combined.groupCounts[g] = groupCounts[g];
 
 	// Reading and writing the same buffer is fine as long as the ranges don't overlap, and a fresh range can't
 	// Parts that already sit next to each other are copied together

@@ -390,6 +390,23 @@ std::vector<std::string> Benchmark::finish() {
 				part(&UpdateTimes::mergeMs), part(&UpdateTimes::lodMs));
 			report << row;
 		}
+
+		// The single worst frame of each part: things that happen once in a while (crossing into another chunk,
+		// a zoom) are under 1% of frames, so the table above can't show them
+		report << "\nworst single frame of each world update part (ms)\nphase        area    apply     load   upload   launch    merge      lod\n";
+		for (int i = 0; i < phaseCount; i++) {
+			const PhaseRecord& r = *phases[i];
+			auto worst = [&r](float UpdateTimes::* member) {
+				float highest = 0.0f;
+				for (const UpdateTimes& t : r.updateParts) highest = std::max(highest, t.*member);
+				return highest;
+			};
+			char row[128];
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], worst(&UpdateTimes::areaMs),
+				worst(&UpdateTimes::applyMs), worst(&UpdateTimes::loadMs), worst(&UpdateTimes::uploadMs), worst(&UpdateTimes::launchMs),
+				worst(&UpdateTimes::mergeMs), worst(&UpdateTimes::lodMs));
+			report << row;
+		}
 	}
 
 	// One row per run, so runs from different versions line up in a spreadsheet

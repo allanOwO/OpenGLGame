@@ -75,12 +75,16 @@ private:
 	struct VisibleSection {
 		const MeshAllocation* mesh;
 		glm::vec3 origin;
+		glm::vec2 min, max;//its x/z extent in the world, to tell which face groups can point at the camera
 	};
 	std::vector<VisibleSection> visibleSections;
 	std::vector<DrawCommand> drawCommands;
 	std::vector<glm::vec3> drawOrigins;
 	std::vector<int> drawPages;//which of the mesh pool's buffers each draw reads
-	void drawList(const World& world);//draws visibleSections in one call
+	// Draws visibleSections, skipping face groups that point away from the viewer: from viewPoint (a camera),
+	// or along viewDirection when there's no point (the sun is so far away it only has a direction)
+	// Returns the triangles drawn
+	int64_t drawList(const World& world, const glm::vec3* viewPoint, const glm::vec3& viewDirection);
 	// Fills visibleSections with the sections inside the frustum that have a mesh, testing whole regions first
 	// nearestFirst sorts regions by distance (chunks within a region are close together, so that's near enough for depth)
 	void collectVisible(const World& world, const Frustum& view, const glm::vec3& cameraPos, bool nearestFirst, bool countStats);

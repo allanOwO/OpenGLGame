@@ -11,7 +11,8 @@ uniform vec3 camPos;
 
 void main()
 {
-    vec3 sunPos = camPos + normalize(sunDirection) * 500.0; // Far away in sun direction
+    // Distance doesn't matter, only the size/distance ratio (the angle it covers), depth is forced to the far plane below
+    vec3 sunPos = camPos + normalize(sunDirection) * 100.0;
 
     mat4 billboard = mat4(
         vec4(view[0][0], view[1][0], view[2][0], 0.0), // Right
@@ -19,6 +20,7 @@ void main()
         vec4(view[0][2], view[1][2], view[2][2], 0.0), // Forward
         vec4(sunPos, 1.0)
     );
-    gl_Position = projection * view * billboard * vec4(aPos * 50.0, 0.0, 1.0); // Scale sun size
+    vec4 clipPos = projection * view * billboard * vec4(aPos * 10.0, 0.0, 1.0); // Scale sun size
+    gl_Position = clipPos.xyww; // z = w so after the divide depth is 1.0, behind everything, like a skybox
     TexCoord = aTexCoord;
 }

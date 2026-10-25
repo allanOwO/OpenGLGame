@@ -293,8 +293,8 @@ void Renderer::renderShadowMap(const World& world) {
 
     //render chunks 1st pass to create shadows, depth only so the order doesn't matter
     collectVisible(world, lightFrustum, glm::vec3(0.0f), false, false);
-    for (const VisibleSection& entry : visibleSections) stats.shadowTriangles += entry.mesh->indexCount() / 3;
-    drawList(world);
+    // From the sun, faces pointing away from it are skipped (towards the sun is -sunDirection)
+    stats.shadowTriangles += drawList(world, nullptr, sunDirection);
     if (!visibleSections.empty()) stats.shadowDrawCalls++;
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -311,9 +311,9 @@ void Renderer::drawChunks(const World& world, const glm::vec3& cameraPos) {
     // before the fragment shader runs, instead of being lit and shadowed and then drawn over
     collectVisible(world, frustum, cameraPos, true, true);
 
-    drawList(world);
+    stats.triangles = drawList(world, &cameraPos, glm::vec3(0.0f));
     if (!visibleSections.empty()) stats.drawCalls++;
-    stats.drawCommands = static_cast<int>(visibleSections.size());
+    stats.drawCommands = static_cast<int>(drawCommands.size());
     glBindVertexArray(0);
 }
 
@@ -352,11 +352,10 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
         // Everything far away in the region is one mesh, culled with the region: its triangles are cheap, draws aren't
         const MeshAllocation& merged = entry.region->merged;
         if (merged.vertexCount > 0) {
-            visibleSections.push_back({ &merged, regionOrigin });
-            if (countStats) {
-                stats.mergedRegionsDrawn++;
-                stats.triangles += merged.indexCount() / 3;
-            }
+            float width = static_cast<float>(ChunkRegion::regionSize * Chunk::chunkSize);
+            glm::vec2 corner(regionOrigin.x, regionOrigin.z);
+            visibleSections.push_back({ &merged, regionOrigin, corner, corner + glm::vec2(width) });
+            if (countStats) stats.mergedRegionsDrawn++;
         }
 
         for (const Chunk* chunk : entry.region->chunks) {
@@ -389,36 +388,88 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
                     if (countStats) stats.sectionsCulled++;
                     continue;
                 }
-                visibleSections.push_back({ &mesh, regionOrigin });
+                glm::vec2 corner(origin.x, origin.z);
+                visibleSections.push_back({ &mesh, regionOrigin, corner, corner + glm::vec2(static_cast<float>(ChunkSection::size)) });
                 if (countStats) {
                     stats.sectionsDrawn++;
                     stats.sectionsByLod[chunk->sections[s].meshLod]++;
-                    stats.triangles += mesh.indexCount() / 3;
                 }
             }
         }
     }
 }
 
-void Renderer::drawList(const World& world) {
-    // One command per mesh: which vertices (baseVertex) and which origin (baseInstance)
+int64_t Renderer::drawList(const World& world, const glm::vec3* viewPoint, const glm::vec3& viewDirection) {
+    // One command per run of visible face groups: which vertices (baseVertex) and which origin (baseInstance)
     // The GPU runs through the list from one call per mesh pool page, instead of the CPU issuing a draw per mesh
     drawCommands.clear();
     drawOrigins.clear();
     drawPages.clear();
+    int64_t triangles = 0;
     for (const VisibleSection& entry : visibleSections) {
-        DrawCommand command;
-        command.count = static_cast<GLuint>(entry.mesh->indexCount());
-        command.instanceCount = 1;
-        command.firstIndex = 0;
-        command.baseVertex = entry.mesh->firstVertex;
-        command.baseInstance = static_cast<GLuint>(drawCommands.size());
-        drawCommands.push_back(command);
-        drawOrigins.push_back(entry.origin);
-        drawPages.push_back(entry.mesh->page);
+        // A face pointing +X can only be seen from its +X side. Every +X face in this mesh is at or past min.x,
+        // so with the viewer at or before min.x none of them can be: the whole group is skipped
+        // From the sun every face in a group points the same way relative to it, so it's all or nothing
+        bool visible[faceGroupCount];
+        if (viewPoint) {
+            visible[NegXFaces] = viewPoint->x < entry.max.x;
+            visible[PosXFaces] = viewPoint->x > entry.min.x;
+            visible[NegZFaces] = viewPoint->z < entry.max.y;
+            visible[PosZFaces] = viewPoint->z > entry.min.y;
+        }
+        else {
+            visible[NegXFaces] = viewDirection.x > 0.0f;//a -X face faces the viewer when the viewer looks along +X
+            visible[PosXFaces] = viewDirection.x < 0.0f;
+            visible[NegZFaces] = viewDirection.z > 0.0f;
+            visible[PosZFaces] = viewDirection.z < 0.0f;
+        }
+        visible[VerticalFaces] = true;
+
+        // Groups next to each other in the mesh that are both visible go in one command
+        // A small hidden group between two visible ones is drawn anyway: a draw costs the GPU about as much
+        // as ~400 triangles, so splitting around fewer than that costs more than it saves
+        const GLsizei splitAtLeast = 800;//vertices (200 quads, 400 triangles)
+        const MeshAllocation& mesh = *entry.mesh;
+        GLint groupStart = mesh.firstVertex;
+        GLint runStart = 0;
+        GLsizei runLength = 0;
+        GLsizei gap = 0;//hidden vertices since the last visible group of the run
+        auto addRun = [&]() {
+            if (runLength == 0) return;
+            DrawCommand command;
+            command.count = static_cast<GLuint>(runLength / 4 * 6);
+            command.instanceCount = 1;
+            command.firstIndex = 0;
+            command.baseVertex = runStart;
+            command.baseInstance = static_cast<GLuint>(drawCommands.size());
+            drawCommands.push_back(command);
+            drawOrigins.push_back(entry.origin);
+            drawPages.push_back(mesh.page);
+            triangles += runLength / 2;
+            runLength = 0;
+        };
+        for (int g = 0; g < faceGroupCount; g++) {
+            GLsizei count = mesh.groupCounts[g];
+            if (count == 0) continue;
+            if (visible[g]) {
+                if (runLength == 0) runStart = groupStart;
+                runLength += gap + count;//the hidden groups in between come along
+                gap = 0;
+            }
+            else if (runLength > 0 && gap + count < splitAtLeast) {
+                gap += count;//maybe drawn, if another visible group follows
+            }
+            else {
+                addRun();//too much hidden in between, split
+                gap = 0;
+            }
+            groupStart += count;
+        }
+        addRun();//a hidden gap at the end is just left off
     }
 
     world.getMeshPool().draw(drawCommands, drawOrigins, drawPages);
+    return triangles;
 }
 
 void Renderer::drawHighlight(const RaycastHit& highlight, const glm::mat4& view, const glm::mat4& projection) {
@@ -451,11 +502,15 @@ void Renderer::renderSun(const glm::mat4& view, const glm::mat4& projection, con
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // The sun sits at depth 1.0 (the far plane), which only passes where nothing was drawn, so terrain always covers it
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
 
     glBindVertexArray(sunVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
     glBindVertexArray(0);
-    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
     glDisable(GL_BLEND);
 }

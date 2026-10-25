@@ -13,6 +13,7 @@ struct MeshAllocation {
 	GLint firstVertex = 0;//inside that page
 	GLsizei vertexCount = 0;//used by the mesh
 	GLsizei capacity = 0;//reserved, a bit more than vertexCount so small edits can rebuild in place
+	GLsizei groupCounts[faceGroupCount] = {};//vertices of each FaceGroup, one after another from firstVertex
 
 	GLsizei indexCount() const { return vertexCount / 4 * 6; }//every quad is 4 vertices, 6 indices
 };
@@ -58,11 +59,12 @@ public:
 	ChunkMeshPool& operator=(const ChunkMeshPool&) = delete;
 
 	// Replace what's in allocation with these vertices (reuses its range when they fit)
-	void upload(MeshAllocation& allocation, const std::vector<PackedVertex>& vertices);
+	void upload(MeshAllocation& allocation, const std::vector<PackedVertex>& vertices, const int groupCounts[faceGroupCount]);
 	void release(MeshAllocation& allocation);//give its range back, call before a chunk is destroyed
 	// Replace target with all of parts one after another, copied on the GPU (nothing is sent from the CPU)
 	// parts are left as they are, and may be inside target's old mesh (it's only released after copying)
-	void combine(MeshAllocation& target, const std::vector<MeshRange>& parts);
+	// parts must already be in face group order, groupCounts says how many of the vertices are in each group
+	void combine(MeshAllocation& target, const std::vector<MeshRange>& parts, const GLsizei groupCounts[faceGroupCount]);
 
 	// commands[i] is drawn with origins[i] as its chunk position, out of page pages[i]
 	// const because it only streams per frame data to the GPU, the meshes themselves aren't changed

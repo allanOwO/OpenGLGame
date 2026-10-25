@@ -25,9 +25,11 @@ struct ChunkSection {
 	uint8_t meshLod = 0;//detail level the current mesh was built at (see Chunk::lod), for the debug overlay
 	// While the section is in its region's merged mesh (Chunk::mergedSections), its vertices live only there
 	// (keeping its own copy too doubled mesh memory). This is where, as an offset into the merged mesh
+	// The merged mesh is grouped by face direction too, so the slice is one piece per FaceGroup
 	// mergedCount 0 = that slice is out of date (the section was remeshed since), `mesh` has the newest
-	GLint mergedFirst = 0;
-	GLsizei mergedCount = 0;
+	GLint mergedFirst[faceGroupCount] = {};
+	GLsizei mergedGroupCounts[faceGroupCount] = {};
+	GLsizei mergedCount = 0;//all groups together
 	bool rebuildNeeded = true;
 	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
 

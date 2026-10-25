@@ -358,7 +358,8 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 }
 
 MeshData Chunk::buildMesh(const ChunkMeshInput& fullInput, int lod) {
-	MeshData mesh;
+	// Quads go into one list per face group, joined at the end (see FaceGroup)
+	MeshData groups[faceGroupCount];
 	// Far away: mesh a shrunk copy where each cell is several blocks, then scale the quads back up to block units
 	// Everything below works the same on either, it just sees a smaller grid
 	ChunkMeshInput shrunk;
@@ -382,6 +383,7 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& fullInput, int lod) {
 
 		for (int direction = -1; direction <= 1; direction += 2) {
 			int face = faceIndex(axis, direction);
+			MeshData& mesh = groups[faceGroupOf(face)];
 
 			// One 2D slice of the chunk at a time, skipping slices with nothing to draw (all sky or all rock)
 			uint32_t slicesToMesh = solid.slicesWithFaces(axis, direction);
@@ -458,6 +460,11 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& fullInput, int lod) {
 				}
 			}
 		}
+	}
+	MeshData mesh;
+	for (int g = 0; g < faceGroupCount; g++) {
+		mesh.groupCounts[g] = static_cast<int>(groups[g].vertices.size());
+		mesh.vertices.insert(mesh.vertices.end(), groups[g].vertices.begin(), groups[g].vertices.end());
 	}
 	return mesh;
 }

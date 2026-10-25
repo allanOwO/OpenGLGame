@@ -113,7 +113,12 @@ private:
 	size_t cursorAfterMove(const glm::ivec3& move) const;//where loading can resume after the player changes chunk
 	void updateActiveChunks();//uses lastPlayerChunk
 	bool isInRange(uint64_t key) const;//within render distance of the player's chunk
+	bool isPastUnloadDistance(uint64_t key) const;
 	void unloadFarChunks(const glm::ivec3& playerChunkPos);
+	// Moving from one chunk to the next only changes which chunks are at the edges of the loaded square,
+	// so only those strips are looked at (a few hundred chunks instead of all 160k at render distance 200)
+	void updateEdges(const glm::ivec3& from, const glm::ivec3& to);
+	std::unordered_map<uint64_t, Chunk>::iterator unloadChunk(std::unordered_map<uint64_t, Chunk>::iterator it);//returns the next one
 	void generateChunkAsync(int chunkX, int chunkZ);
 	void tryApplyChunkGeneration(bool waitForAll = false);
 	void markNeighboursForRebuild(int chunkX, int chunkZ);

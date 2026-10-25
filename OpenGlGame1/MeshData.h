@@ -7,7 +7,8 @@
 struct MeshData {
 	//one section in one range of ChunkMeshPool's buffer, all block types share the texture atlas
 	//4 vertices per quad, no index list: every quad uses the pool's shared 0,1,2 0,2,3 indices
-	std::vector<PackedVertex> vertices;
+	std::vector<PackedVertex> vertices;//ordered by FaceGroup
+	int groupCounts[faceGroupCount] = {};//vertices in each group
 };
 
 //copy of one 16x16x16 section plus a 1 block border from around it (neighbour columns, and the sections above and below)

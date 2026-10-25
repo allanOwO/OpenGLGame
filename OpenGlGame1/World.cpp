@@ -24,6 +24,12 @@ static const double initialMeshingBudgetSeconds = 0.004;
 // (every chunk crossed loads a row of chunks and moves the LOD rings). The time budgets above still keep frames smooth
 static const size_t meshJobsPerWorker = 8;
 
+// Same for generation: a chunk takes ~0.14 ms, so one each per frame left the workers waiting most of the time
+// (render distance 200 took 22 s to load ~1.5 s of generating). Finished ones are added on a time budget
+static const size_t generationJobsPerWorker = 4;
+static const double applyBudgetSeconds = 0.001;
+static const double initialApplyBudgetSeconds = 0.004;
+
 // A region is merged again once nothing in it has changed for this long, so a region that's streaming in
 // (64 columns, each meshed and then remeshed as neighbours arrive) is copied once instead of dozens of times
 // Until then the new sections are drawn on their own, so nothing is missing in the meantime
@@ -128,10 +134,18 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
         glm::vec2 move(playerChunkPos.x - lastPlayerChunk.x, playerChunkPos.z - lastPlayerChunk.z);
         moved = glm::length(move);
         loadCursor = areaChanged ? 0 : cursorAfterMove(playerChunkPos - lastPlayerChunk);
+        glm::ivec3 previousChunk = lastPlayerChunk;
         lastPlayerChunk = playerChunkPos;
+        // Walking: just the edges. A big jump would make the strips most of the square anyway,
+        // and a render distance change moves every edge, so those look at every chunk
+        if (!areaChanged && std::abs(playerChunkPos.x - previousChunk.x) <= 8 && std::abs(playerChunkPos.z - previousChunk.z) <= 8) {
+            updateEdges(previousChunk, playerChunkPos);
+        }
+        else {
+            updateActiveChunks();
+            unloadFarChunks(playerChunkPos);
+        }
         areaChanged = false;
-        updateActiveChunks();
-        unloadFarChunks(playerChunkPos);
         refreshMeshHeap();
         checkSimulationBoundary();
     }
@@ -230,7 +244,7 @@ void World::updateLoading(const glm::ivec3& playerChunkPos) {
     // Start as many generation jobs as there are free workers, nearest missing chunks first
     // (a fixed number per frame made loading speed depend on the frame rate instead of the CPU)
     size_t running = chunkGenerationFutures.size();
-    while (loadCursor < loadOrder.size() && running < workers.size()) {
+    while (loadCursor < loadOrder.size() && running < workers.size() * generationJobsPerWorker) {
         int chunkX = playerChunkPos.x + loadOrder[loadCursor].x;
         int chunkZ = playerChunkPos.z + loadOrder[loadCursor].y;
         uint64_t key = getChunkKey(chunkX, chunkZ);
@@ -288,11 +302,22 @@ void World::generateChunkAsync(int chunkX, int chunkZ) {
 }
 
 void World::tryApplyChunkGeneration(bool waitForAll) {
+    double start = nowSeconds();
+    const double budget = isInitialLoading ? initialApplyBudgetSeconds : applyBudgetSeconds;
     for (auto it = chunkGenerationFutures.begin(); it != chunkGenerationFutures.end();) {
+        if (!waitForAll && nowSeconds() - start > budget) break;//rest next frame
         // waitForAll blocks on unfinished jobs (used before saving), otherwise only take the finished ones
         if (waitForAll || it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
 
             uint64_t key = it->first; // The key is the uint64_t chunk identifier
+            if (isPastUnloadDistance(key)) {
+                // The player moved away while it generated. updateEdges only looks at chunks it can find,
+                // so adding this one would leave it loaded forever. Edits are kept like any unloaded chunk
+                Chunk chunk = it->second.get();
+                if (chunk.modified) storage.store(key, encodeBlocks(chunk.flatBlocks()));
+                it = chunkGenerationFutures.erase(it);
+                continue;
+            }
             auto inserted = chunks.emplace(key, it->second.get());
             Chunk& chunk = inserted.first->second;
             chunk.isActive = isInRange(key);//the player may have moved while it generated
@@ -335,26 +360,61 @@ void World::findNeighbours(uint64_t key, const Chunk* neighbours[8]) const {
     neighbours[7] = findChunk(chunkX - 1, chunkZ - 1); // -X-Z
 }
 
-void World::unloadFarChunks(const glm::ivec3& playerChunkPos) {
+bool World::isPastUnloadDistance(uint64_t key) const {
     // Margin stops chunks on the edge being unloaded and reloaded when walking back and forth
     const int unloadDistance = renderDistance + unloadMargin;
+    return std::abs(chunkKeyX(key) - lastPlayerChunk.x) > unloadDistance
+        || std::abs(chunkKeyZ(key) - lastPlayerChunk.z) > unloadDistance;
+}
+
+std::unordered_map<uint64_t, Chunk>::iterator World::unloadChunk(std::unordered_map<uint64_t, Chunk>::iterator it) {
+    // Unmodified chunks can be regenerated from the seed, only player edits need keeping
+    if (it->second.modified) {
+        storage.store(it->first, encodeBlocks(it->second.flatBlocks()));
+    }
+    // Any mesh job still running for it only has a copy, its result is dropped when it finishes
+    for (ChunkSection& section : it->second.sections) meshPool.release(section.mesh);
+    removeFromRegion(it->first, it->second);
+    return chunks.erase(it);
+}
+
+void World::unloadFarChunks(const glm::ivec3& playerChunkPos) {
+    // Looks at every chunk, only for big jumps and render distance changes (see updateEdges)
     for (auto it = chunks.begin(); it != chunks.end();) {
-        int dx = std::abs(chunkKeyX(it->first) - playerChunkPos.x);
-        int dz = std::abs(chunkKeyZ(it->first) - playerChunkPos.z);
-        if (dx > unloadDistance || dz > unloadDistance) {
-            // Unmodified chunks can be regenerated from the seed, only player edits need keeping
-            if (it->second.modified) {
-                storage.store(it->first, encodeBlocks(it->second.flatBlocks()));
+        if (isPastUnloadDistance(it->first)) it = unloadChunk(it);
+        else ++it;
+    }
+}
+
+// Calls visit(x, z) for every chunk position within `radius` (a square, like render distance) of `inside`
+// that isn't also within `radius` of `outside`: the strips one square has and the other doesn't
+template <typename Visit>
+static void forEachOnlyIn(const glm::ivec3& inside, const glm::ivec3& outside, int radius, Visit visit) {
+    for (int x = inside.x - radius; x <= inside.x + radius; x++) {
+        bool columnOutside = std::abs(x - outside.x) > radius;
+        for (int z = inside.z - radius; z <= inside.z + radius; z++) {
+            if (!columnOutside && std::abs(z - outside.z) <= radius) {
+                z = std::min(outside.z + radius, inside.z + radius);//skip the part both squares share
+                continue;
             }
-            // Any mesh job still running for it only has a copy, its result is dropped when it finishes
-            for (ChunkSection& section : it->second.sections) meshPool.release(section.mesh);
-            removeFromRegion(it->first, it->second);
-            it = chunks.erase(it);
-        }
-        else {
-            ++it;
+            visit(x, z);
         }
     }
+}
+
+void World::updateEdges(const glm::ivec3& from, const glm::ivec3& to) {
+    // Active = inside render distance. The strip behind the player stops being active, the one ahead starts
+    forEachOnlyIn(from, to, renderDistance, [&](int x, int z) {
+        if (Chunk* chunk = findChunk(x, z)) chunk->isActive = false;
+    });
+    forEachOnlyIn(to, from, renderDistance, [&](int x, int z) {
+        if (Chunk* chunk = findChunk(x, z)) chunk->isActive = true;
+    });
+    // And the strip that's now past the unload margin is unloaded
+    forEachOnlyIn(from, to, renderDistance + unloadMargin, [&](int x, int z) {
+        auto it = chunks.find(getChunkKey(x, z));
+        if (it != chunks.end()) unloadChunk(it);
+    });
 }
 
 // ---------- meshing ----------
@@ -414,7 +474,7 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
 
         MeshData mesh = job.future.get();
         if (Chunk* chunk = findChunk(chunkKeyX(it->first.column), chunkKeyZ(it->first.column))) {
-            meshPool.upload(chunk->sections[it->first.section].mesh, mesh.vertices);
+            meshPool.upload(chunk->sections[it->first.section].mesh, mesh.vertices, mesh.groupCounts);
             chunk->sections[it->first.section].meshLod = job.lod;
             chunk->updateMeshedBit(it->first.section);
             sectionMeshChanged(it->first.column, *chunk, it->first.section);
@@ -570,11 +630,25 @@ void World::checkSimulationBoundary() {
 
 void World::rebuildRegion(ChunkRegion& region) {
     // Each section's newest vertices are either its own mesh (meshed since the last merge, or never merged)
-    // or its slice of the current merged mesh. The new merged mesh is copied together from those
-    struct Member { ChunkSection* section; GLint offset; };
-    std::vector<MeshRange> parts;
+    // or its slice of the current merged mesh. The new merged mesh is copied together from those,
+    // group by group: every member's -X faces, then every member's -Z faces... so the merged mesh is grouped too
+    struct Member {
+        ChunkSection* section;
+        int page;
+        GLint first[faceGroupCount];//where each group is now
+        GLsizei count[faceGroupCount];
+    };
     std::vector<Member> members;
-    GLint offset = 0;
+
+    // Where a section's slice of the current merged mesh is, one range per group
+    auto sliceRanges = [&](const ChunkSection& section) {
+        std::vector<MeshRange> ranges;
+        for (int g = 0; g < faceGroupCount; g++) {
+            ranges.push_back({ region.merged.page, region.merged.firstVertex + section.mergedFirst[g], section.mergedGroupCounts[g] });
+        }
+        return ranges;
+    };
+
     for (Chunk* chunk : region.chunks) {
         int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;
         int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
@@ -586,28 +660,58 @@ void World::rebuildRegion(ChunkRegion& region) {
                 // Back inside simulation distance: it'll be drawn on its own again, so it needs its own copy back
                 // (done now, the old merged mesh is released at the end of this)
                 if (hasSlice && section.mesh.vertexCount == 0) {
-                    meshPool.combine(section.mesh, { { region.merged.page, region.merged.firstVertex + section.mergedFirst, section.mergedCount } });
+                    meshPool.combine(section.mesh, sliceRanges(section), section.mergedGroupCounts);
                 }
                 section.mergedCount = 0;
                 continue;
             }
-            MeshRange source{ 0, 0, 0 };
-            if (section.mesh.vertexCount > 0) source = { section.mesh.page, section.mesh.firstVertex, section.mesh.vertexCount };
-            else if (hasSlice) source = { region.merged.page, region.merged.firstVertex + section.mergedFirst, section.mergedCount };
-            if (source.count == 0) continue;//nothing to draw
-            parts.push_back(source);
-            members.push_back({ &section, offset });
-            offset += source.count;
+            Member member{ &section, 0, {}, {} };
+            if (section.mesh.vertexCount > 0) {
+                member.page = section.mesh.page;
+                GLint first = section.mesh.firstVertex;
+                for (int g = 0; g < faceGroupCount; g++) {
+                    member.first[g] = first;
+                    member.count[g] = section.mesh.groupCounts[g];
+                    first += member.count[g];
+                }
+            }
+            else if (hasSlice) {
+                member.page = region.merged.page;
+                for (int g = 0; g < faceGroupCount; g++) {
+                    member.first[g] = region.merged.firstVertex + section.mergedFirst[g];
+                    member.count[g] = section.mergedGroupCounts[g];
+                }
+            }
+            else continue;//nothing to draw
+            members.push_back(member);
         }
     }
-    meshPool.combine(region.merged, parts);
+
+    std::vector<MeshRange> parts;
+    GLsizei groupTotals[faceGroupCount] = {};
+    GLint offset = 0;
+    std::vector<GLint> newFirst(members.size() * faceGroupCount);//where each member's groups go in the new mesh
+    for (int g = 0; g < faceGroupCount; g++) {
+        for (size_t m = 0; m < members.size(); m++) {
+            parts.push_back({ members[m].page, members[m].first[g], members[m].count[g] });
+            newFirst[m * faceGroupCount + g] = offset;
+            offset += members[m].count[g];
+            groupTotals[g] += members[m].count[g];
+        }
+    }
+    meshPool.combine(region.merged, parts, groupTotals);
 
     // Every member now lives in the merged mesh only, and is drawn as part of it instead of on its own
     for (Chunk* chunk : region.chunks) chunk->mergedSections = 0;
-    for (const Member& member : members) {
-        member.section->mergedFirst = member.offset;
-        member.section->mergedCount = static_cast<GLsizei>(parts[&member - members.data()].count);
-        meshPool.release(member.section->mesh);
+    for (size_t m = 0; m < members.size(); m++) {
+        ChunkSection& section = *members[m].section;
+        section.mergedCount = 0;
+        for (int g = 0; g < faceGroupCount; g++) {
+            section.mergedFirst[g] = newFirst[m * faceGroupCount + g];
+            section.mergedGroupCounts[g] = members[m].count[g];
+            section.mergedCount += members[m].count[g];
+        }
+        meshPool.release(section.mesh);
     }
     for (Chunk* chunk : region.chunks) {
         for (int s = 0; s < Chunk::sectionCount; s++) {

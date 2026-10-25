@@ -21,4 +21,16 @@ inline uint16_t packPlace(int columnX, int columnZ, int section) {
     return static_cast<uint16_t>(columnX | (columnZ << 3) | (section << 6));
 }
 
+// Meshes keep their faces grouped by the way they point, so whole groups facing away from the camera can be skipped
+// (the GPU would throw those triangles away anyway, but only after running the vertex shader on them)
+// Up and down share a group: tops are nearly always seen, and terrain has almost no bottoms
+// The order puts the three groups seen from most directions next to each other, so they're usually one draw
+enum FaceGroup { NegXFaces, NegZFaces, VerticalFaces, PosXFaces, PosZFaces, faceGroupCount };
+
+// face index as in BlockFace: 0 Front (-Z), 1 Back (+Z), 2 Left (-X), 3 Right (+X), 4 Top, 5 Bottom
+inline int faceGroupOf(int face) {
+    static const int groups[6] = { NegZFaces, PosZFaces, NegXFaces, PosXFaces, VerticalFaces, VerticalFaces };
+    return groups[face];
+}
+
 static_assert(sizeof(PackedVertex) == 16, "PackedVertex layout changed, update ChunkMeshPool::setVertexAttributes and vertex_shader.glsl");
