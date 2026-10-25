@@ -16,6 +16,8 @@ class World;
 //   SPIN   - turns on the spot for a full circle, nothing new loads, so this is pure rendering cost
 //   FLIGHT - flies in a straight line, chunks stream in and out the whole time
 //   EDITS  - places then removes blocks at a fixed rate, measures how long an edit takes to show up
+//   ZOOM   - zooms in and out (4x, 8x, 16x, off, 4x) while panning, like pressing C and scrolling
+//            last so the phases before it stay comparable with older runs (it's in the report, not history.csv)
 //
 // Results are written to benchmarks/<date>.txt and a line is added to benchmarks/history.csv
 class Benchmark
@@ -40,6 +42,7 @@ public:
 	glm::mat4 viewMatrix() const;
 	float getYaw() const { return yaw; }
 	float getPitch() const { return pitch; }
+	float zoom() const { return zoomLevel; }//1 except in the zoom phase
 
 	std::string status() const;//"FLIGHT 12.0 / 20.0 S", shown while it runs
 
@@ -51,7 +54,7 @@ public:
 	std::vector<std::string> finish();
 
 private:
-	enum class Phase { Load, Spin, Flight, Edits, Done };
+	enum class Phase { Load, Spin, Flight, Edits, Zoom, Done };
 
 	// Everything measured during one phase
 	struct PhaseRecord {
@@ -80,13 +83,14 @@ private:
 
 	Phase phase = Phase::Load;
 	double phaseTime = 0.0;//seconds into the current phase
-	PhaseRecord records[4];
+	PhaseRecord records[5];
 	bool loadTimedOut = false;
 	int chunksAfterLoad = 0;
 	int editsDone = 0;
 
 	glm::vec3 position = glm::vec3(0.0f);
 	float yaw = 0.0f, pitch = 0.0f;
+	float zoomLevel = 1.0f;
 	glm::ivec3 editOrigin = glm::ivec3(0);
 
 	// Flight height samples every pathStep blocks along +X, smoothed so the camera glides over hills

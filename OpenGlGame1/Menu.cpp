@@ -244,6 +244,13 @@ MenuAction Menu::drawSettings(UI& ui, Settings& settings) {
 		Settings::minRenderDistance, Settings::maxRenderDistance)) {
 		action.type = MenuAction::Type::SettingsChanged;
 	}
+	y += l.buttonH + l.gap;
+
+	std::string simulationText = "SIMULATION DISTANCE: " + std::to_string(settings.simulationDistance) + " CHUNKS";
+	if (ui.slider(simulationText, l.left(), y, l.buttonW, l.buttonH, settings.simulationDistance,
+		Settings::minSimulationDistance, Settings::maxRenderDistance)) {
+		action.type = MenuAction::Type::SettingsChanged;
+	}
 	y += l.buttonH + l.gap * 3;
 
 	// Level of detail, each slider is where that level starts as a percentage of render distance

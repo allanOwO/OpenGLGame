@@ -79,6 +79,7 @@ private:
 	std::vector<VisibleSection> visibleSections;
 	std::vector<DrawCommand> drawCommands;
 	std::vector<glm::vec3> drawOrigins;
+	std::vector<int> drawPages;//which of the mesh pool's buffers each draw reads
 	void drawList(const World& world);//draws visibleSections in one call
 	// Fills visibleSections with the sections inside the frustum that have a mesh, testing whole regions first
 	// nearestFirst sorts regions by distance (chunks within a region are close together, so that's near enough for depth)

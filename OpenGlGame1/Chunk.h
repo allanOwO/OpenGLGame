@@ -23,6 +23,11 @@ struct ChunkSection {
 
 	MeshAllocation mesh;//where its mesh is in World's ChunkMeshPool, World uploads and releases it
 	uint8_t meshLod = 0;//detail level the current mesh was built at (see Chunk::lod), for the debug overlay
+	// While the section is in its region's merged mesh (Chunk::mergedSections), its vertices live only there
+	// (keeping its own copy too doubled mesh memory). This is where, as an offset into the merged mesh
+	// mergedCount 0 = that slice is out of date (the section was remeshed since), `mesh` has the newest
+	GLint mergedFirst = 0;
+	GLsizei mergedCount = 0;
 	bool rebuildNeeded = true;
 	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
 
@@ -79,6 +84,7 @@ public:
 	// Shrinks a full detail mesh input so each cell covers scale^3 blocks, see Chunk.cpp for how cells are picked
 	static ChunkMeshInput downsample(const ChunkMeshInput& full, int lod);
 	uint8_t lod = 0;//level the whole column is meshed at, World picks it from distance and zoom
+	bool zoomDetail = false;//lod is finer than its distance gives, because it was in the zoomed view
 
 	std::array<ChunkSection, sectionCount> sections;
 	glm::vec3 chunkPosition;//world position of the column's bottom corner
@@ -91,6 +97,11 @@ public:
 		if (sections[section].mesh.vertexCount > 0) meshedSections |= static_cast<uint16_t>(1u << section);
 		else meshedSections &= static_cast<uint16_t>(~(1u << section));
 	}
+
+	// Bit s set = section s is drawn as part of its region's merged mesh instead of on its own (see World::rebuildRegion)
+	// Sections not in it (inside simulation distance, or meshed since the last merge) are drawn on their own
+	uint16_t mergedSections = 0;
+	bool mergeWanted = false;//was outside simulation distance when its region was last merged
 
 	bool modified = false;//player changed a block, so it must be kept when unloaded (it can't be regenerated)
 

@@ -20,6 +20,8 @@ namespace {
 	const double editInterval = 0.05;//20 edits a second
 	const int editCount = 100;
 	const double editSeconds = editCount * editInterval + 0.5;//a little extra so the last meshes land
+	const double zoomSeconds = 12.0;
+	const float zoomPanSpeed = 20.0f;//degrees per second, turning while zoomed
 	const float pathStep = 4.0f;//blocks between height samples
 	const float clearance = 20.0f;//camera height above the smoothed terrain
 
@@ -55,7 +57,7 @@ namespace {
 
 Benchmark::Benchmark(const World& world, int screenWidth, int screenHeight)
 	: renderDistance(world.getRenderDistance()),
-	lodText("LOD " + std::to_string(world.getLodPercent(0)) + "/" + std::to_string(world.getLodPercent(1)) + "/" + std::to_string(world.getLodPercent(2)) + "%"),
+	lodText("LOD " + std::to_string(world.getLodPercent(0)) + "/" + std::to_string(world.getLodPercent(1)) + "/" + std::to_string(world.getLodPercent(2)) + "%  SIMULATION " + std::to_string(world.getSimulationDistance())),
 	screenWidth(screenWidth), screenHeight(screenHeight),
 	runName("benchmark_" + timestamp("%Y-%m-%d_%H-%M-%S")) {
 
@@ -123,6 +125,7 @@ const char* Benchmark::phaseName(Phase p) {
 	case Phase::Spin: return "SPIN";
 	case Phase::Flight: return "FLIGHT";
 	case Phase::Edits: return "EDITS";
+	case Phase::Zoom: return "ZOOM";
 	default: return "DONE";
 	}
 }
@@ -133,6 +136,7 @@ std::string Benchmark::status() const {
 	case Phase::Spin: text += " / " + fixed(spinSeconds, 0) + " S"; break;
 	case Phase::Flight: text += " / " + fixed(flightSeconds, 0) + " S"; break;
 	case Phase::Edits: text += " / " + fixed(editSeconds, 1) + " S"; break;
+	case Phase::Zoom: text += " / " + fixed(zoomSeconds, 0) + " S"; break;
 	default: text += " S"; break;
 	}
 	return text + "   (ESC TO CANCEL)";
@@ -143,6 +147,7 @@ std::string Benchmark::screenshotPath() {
 	const char* name = nullptr;
 	if (screenshotsTaken == 0 && phase == Phase::Spin) name = "spin";
 	else if (screenshotsTaken == 1 && phase == Phase::Flight && phaseTime >= flightSeconds * 0.5) name = "flight";
+	else if (screenshotsTaken == 2 && phase == Phase::Zoom && phaseTime >= 5.5) name = "zoom";//8x, 1.5 s after zooming in
 	if (!name) return "";
 
 	screenshotsTaken++;
@@ -196,8 +201,14 @@ void Benchmark::update(World& world, double deltaSeconds) {
 	case Phase::Edits:
 		doEdits(world);
 		if (phaseTime >= editSeconds) {
+			finalStats = world.getStats();//before zooming adds detail, so memory matches older runs
+			startPhase(Phase::Zoom, world);
+		}
+		break;
+	case Phase::Zoom:
+		if (phaseTime >= zoomSeconds) {
 			endPhase(world);
-			finalStats = world.getStats();
+			zoomLevel = 1.0f;
 			phase = Phase::Done;
 		}
 		break;
@@ -249,6 +260,19 @@ void Benchmark::placeCamera() {
 	case Phase::Edits:
 		pitch = -35.0f;//stays where the flight ended, looking down at the edits
 		break;
+	case Phase::Zoom: {
+		// Same spot, looking out at the horizon and turning. Zoom steps like pressing C then scrolling
+		float t = static_cast<float>(phaseTime);
+		pitch = -5.0f;
+		yaw = zoomPanSpeed * t;
+		if (t < 1.0f) zoomLevel = 1.0f;
+		else if (t < 4.0f) zoomLevel = 4.0f;
+		else if (t < 6.0f) zoomLevel = 8.0f;
+		else if (t < 8.0f) zoomLevel = 16.0f;
+		else if (t < 9.0f) zoomLevel = 1.0f;
+		else zoomLevel = 4.0f;
+		break;
+	}
 	default:
 		break;
 	}
@@ -272,6 +296,7 @@ std::vector<std::string> Benchmark::finish() {
 	const PhaseRecord& spin = records[static_cast<int>(Phase::Spin)];
 	const PhaseRecord& flight = records[static_cast<int>(Phase::Flight)];
 	const PhaseRecord& edits = records[static_cast<int>(Phase::Edits)];
+	const PhaseRecord& zoom = records[static_cast<int>(Phase::Zoom)];
 	FrameSummary spinFrames = spin.frames();
 	FrameSummary flightFrames = flight.frames();
 	FrameSummary editFrames = edits.frames();
@@ -308,7 +333,7 @@ std::vector<std::string> Benchmark::finish() {
 		frameLine("SPIN    ", spin, spinFrames),
 		frameLine("FLIGHT  ", flight, flightFrames) + "  " + fixed(streamedPerSecond, 0) + " CHUNKS/S",
 		"EDITS   " + std::to_string(editsShown) + " EDITS  EDIT TO SCREEN " + fixed(editLatencyMs, 1) + " MS  MESH " + fixed(editMeshMs, 2) + " MS",
-		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAWS (1 CALL)",
+		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAWS",
 		"MEMORY  BLOCKS " + megabytes(finalStats.blockBytes) + " MB  MESHES " + megabytes(finalStats.meshBytes) + " MB",
 	};
 
@@ -324,9 +349,10 @@ std::vector<std::string> Benchmark::finish() {
 
 		// Full detail per phase, the screen only has room for the headline numbers
 		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_cmds\n";
-		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits };
-		const char* names[] = { "load", "spin", "flight", "edits" };
-		for (int i = 0; i < 4; i++) {
+		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits, &zoom };
+		const char* names[] = { "load", "spin", "flight", "edits", "zoom" };
+		const int phaseCount = 5;
+		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			FrameSummary f = r.frames();
 			char row[256];
@@ -340,7 +366,7 @@ std::vector<std::string> Benchmark::finish() {
 		// Each part on its own, so a stutter can be traced to the CPU update, CPU render or the GPU
 		// (they don't add up to the frame: the CPU and GPU work at the same time)
 		report << "\nslowest 1% of frames (99th percentile, ms)\nphase       frame   update   render      gpu\n";
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			char row[128];
 			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f\n", names[i],
@@ -349,8 +375,8 @@ std::vector<std::string> Benchmark::finish() {
 		}
 
 		// Inside World::update, same percentile for each part on its own
-		report << "\nslowest 1% of world update parts (99th percentile, ms)\nphase        area    apply     load   upload   launch\n";
-		for (int i = 0; i < 4; i++) {
+		report << "\nslowest 1% of world update parts (99th percentile, ms)\nphase        area    apply     load   upload   launch    merge      lod\n";
+		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			auto part = [&r](float UpdateTimes::* member) {
 				std::vector<float> values;
@@ -359,8 +385,9 @@ std::vector<std::string> Benchmark::finish() {
 				return percentile99(values);
 			};
 			char row[128];
-			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], part(&UpdateTimes::areaMs),
-				part(&UpdateTimes::applyMs), part(&UpdateTimes::loadMs), part(&UpdateTimes::uploadMs), part(&UpdateTimes::launchMs));
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], part(&UpdateTimes::areaMs),
+				part(&UpdateTimes::applyMs), part(&UpdateTimes::loadMs), part(&UpdateTimes::uploadMs), part(&UpdateTimes::launchMs),
+				part(&UpdateTimes::mergeMs), part(&UpdateTimes::lodMs));
 			report << row;
 		}
 	}

@@ -1,0 +1,33 @@
+Benchmark 2026-10-25 20:21:59
+SEED 1337  RENDER DISTANCE 200  LOD 15/30/60%  SIMULATION 16  1920X1080  RELEASE
+AMD Radeon RX 9060 XT
+
+LOAD    160801 CHUNKS IN 17.72 S  GENERATE 0.14 MS  MESH 0.01 MS PER CHUNK
+SPIN    AVG 1339 FPS  1% LOW 1110  CPU 0.38 MS  GPU 0.61 MS
+FLIGHT  AVG 999 FPS  1% LOW 673  CPU 0.60 MS  GPU 0.75 MS  782 CHUNKS/S
+EDITS   100 EDITS  EDIT TO SCREEN 0.8 MS  MESH 0.01 MS
+SCENE   1.60M TRIANGLES  1250 DRAWS (1 CALL)
+MEMORY  BLOCKS 828.1 MB  MESHES 136.6 MB
+
+phase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_cmds
+load       17.72   14889    840.4       540.2     51.57      0.782      0.313   0.779      0.178    1141461        3361
+spin       10.00   13395   1339.5      1109.8     34.95      0.003      0.380   0.609      0.172    1601728        1250
+flight     20.01   19997    999.5       672.8     29.50      0.166      0.437   0.752      0.186    1641817        2514
+edits       5.50    6951   1263.8       870.0     29.10      0.014      0.398   0.638      0.175    1629025        1383
+zoom       12.00   10813    901.0       417.8    116.12      0.665      0.292   0.691      0.183    1857207         601
+
+slowest 1% of frames (99th percentile, ms)
+phase       frame   update   render      gpu
+load         1.85     1.15     0.69     0.96
+spin         0.90     0.00     0.57     0.74
+flight       1.49     0.81     0.70     0.97
+edits        1.15     0.57     0.60     0.89
+zoom         2.39     2.08     0.59     1.05
+
+slowest 1% of world update parts (99th percentile, ms)
+phase        area    apply     load   upload   launch    merge      lod
+load         0.00     0.13     0.14     0.14     0.95     0.12     0.00
+spin         0.00     0.00     0.00     0.00     0.00     0.00     0.00
+flight       0.00     0.04     0.16     0.22     0.51     0.23     0.00
+edits        0.00     0.00     0.00     0.07     0.32     0.03     0.00
+zoom         0.00     0.00     0.00     0.27     0.52     0.16     1.33

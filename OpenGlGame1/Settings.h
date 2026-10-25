@@ -15,6 +15,9 @@ struct Settings {
 	int lod2xPercent = 15;
 	int lod4xPercent = 30;
 	int lod8xPercent = 60;
+	// Closer than this, columns are drawn one section at a time so edits are quick; further, merged into one draw per region
+	int simulationDistance = 16;//in chunks
+	static constexpr int minSimulationDistance = 4;//keeps your reach always inside it
 
 	bool load(const std::string& path);//false if the file doesn't exist yet (defaults are kept)
 	bool save(const std::string& path) const;

@@ -346,8 +346,21 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
 
     visibleSections.clear();
     for (const VisibleRegion& entry : visibleRegions) {
+        // Vertices are relative to their region (see packPlace), so every draw in it uses the region's corner
+        glm::vec3 regionOrigin = entry.region->origin();
+
+        // Everything far away in the region is one mesh, culled with the region: its triangles are cheap, draws aren't
+        const MeshAllocation& merged = entry.region->merged;
+        if (merged.vertexCount > 0) {
+            visibleSections.push_back({ &merged, regionOrigin });
+            if (countStats) {
+                stats.mergedRegionsDrawn++;
+                stats.triangles += merged.indexCount() / 3;
+            }
+        }
+
         for (const Chunk* chunk : entry.region->chunks) {
-            uint32_t meshed = chunk->meshedSections;
+            uint32_t meshed = chunk->meshedSections & ~chunk->mergedSections;//merged ones were just drawn above
             if (!chunk->isActive || meshed == 0) continue;
 
             // Whole column next, from its lowest to highest drawn section, same idea as the regions
@@ -376,7 +389,7 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
                     if (countStats) stats.sectionsCulled++;
                     continue;
                 }
-                visibleSections.push_back({ &mesh, origin });
+                visibleSections.push_back({ &mesh, regionOrigin });
                 if (countStats) {
                     stats.sectionsDrawn++;
                     stats.sectionsByLod[chunk->sections[s].meshLod]++;
@@ -388,10 +401,11 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
 }
 
 void Renderer::drawList(const World& world) {
-    // One command per chunk: which vertices (baseVertex) and which origin (baseInstance)
-    // The GPU runs through the whole list from a single call, instead of the CPU issuing a draw per chunk
+    // One command per mesh: which vertices (baseVertex) and which origin (baseInstance)
+    // The GPU runs through the list from one call per mesh pool page, instead of the CPU issuing a draw per mesh
     drawCommands.clear();
     drawOrigins.clear();
+    drawPages.clear();
     for (const VisibleSection& entry : visibleSections) {
         DrawCommand command;
         command.count = static_cast<GLuint>(entry.mesh->indexCount());
@@ -401,11 +415,10 @@ void Renderer::drawList(const World& world) {
         command.baseInstance = static_cast<GLuint>(drawCommands.size());
         drawCommands.push_back(command);
         drawOrigins.push_back(entry.origin);
+        drawPages.push_back(entry.mesh->page);
     }
 
-    const ChunkMeshPool& pool = world.getMeshPool();
-    pool.bindForDrawing();
-    pool.draw(drawCommands, drawOrigins);
+    world.getMeshPool().draw(drawCommands, drawOrigins, drawPages);
 }
 
 void Renderer::drawHighlight(const RaycastHit& highlight, const glm::mat4& view, const glm::mat4& projection) {

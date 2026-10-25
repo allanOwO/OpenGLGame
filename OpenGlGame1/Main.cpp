@@ -245,6 +245,7 @@ void Main::startWorld(const WorldInfo& info) {
 
     world = std::make_unique<World>(info.seed, settings.renderDistance);
     world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
+    world->setSimulationDistance(settings.simulationDistance);
     // Edited chunks come from the save, everything else regenerates from the seed (missing file = new world)
     world->loadChunks(WorldSave::chunksPath(info.name));
 
@@ -298,6 +299,7 @@ void Main::startBenchmark() {
     // A fresh world every run, nothing is loaded from or saved to disk so runs can't affect each other
     world = std::make_unique<World>(Benchmark::seed, settings.renderDistance);
     world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
+    world->setSimulationDistance(settings.simulationDistance);
     player = std::make_unique<Player>(window);//not moved, but the rest of Main expects one alongside a world
     benchmark = std::make_unique<Benchmark>(*world, width, height);
 
@@ -380,6 +382,7 @@ void Main::handleMenuAction(const MenuAction& action) {
         if (world) {
             world->setRenderDistance(settings.renderDistance);
             world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
+            world->setSimulationDistance(settings.simulationDistance);
         }
         settingsDirty = true;
         break;
@@ -520,12 +523,15 @@ void Main::run() {
         float sunTime = currentFrame;
         float zoom = 1.0f;
         float farPlane = world ? (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f : 1.0f;
-        LodView lodView;//the benchmark never zooms, so its runs stay comparable
+        LodView lodView;
         if (benchmark) {
             benchmark->update(*world, frameSeconds);//uncapped, so the path takes the same real time on any machine
             cameraPos = benchmark->cameraPos();
             view = benchmark->viewMatrix();
             sunTime = Benchmark::sunTime;
+            zoom = benchmark->zoom();//only its last phase zooms, so the others stay comparable with older runs
+            lodView.zoom = zoom;
+            lodView.forward = benchmark->cameraFront();
         }
         else if (world) {
             cameraPos = player->getCameraPos();
@@ -535,9 +541,12 @@ void Main::run() {
             // so the levels are only picked once per zoom change instead of every frame of the ease
             lodView.zoom = player->getTargetZoom();
             lodView.forward = player->getCameraFront();
-            if (lodView.zoom > 1.0f) {
-                lodView.zoomedView.update(Renderer::projection(lodView.zoom, (float)width / (float)height, farPlane) * view);
-            }
+        }
+        if (lodView.zoom > 1.0f) {
+            float aspect = (float)width / (float)height;
+            lodView.zoomedView.update(Renderer::projection(lodView.zoom, aspect, farPlane) * view);
+            // Twice as wide: turning a little doesn't drop the detail just off the edge (and remesh it straight back)
+            lodView.keepView.update(Renderer::projection(std::max(1.0f, lodView.zoom * 0.5f), aspect, farPlane) * view);
         }
 
         if (world) {

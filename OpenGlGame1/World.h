@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
+#include <deque>
 #include <vector>
 #include <future>
 #include <string>
@@ -24,10 +25,19 @@ struct RaycastHit {
 };
 
 // A square of regionSize x regionSize chunk columns, so the renderer can skip a whole group with one frustum test
+// Also the unit of merged drawing: everything in it outside simulation distance is copied into one mesh, one draw
+// (the GPU pays a fixed cost per draw, so 64 columns of small far meshes as 64+ draws was most of the frame)
 struct ChunkRegion {
 	static constexpr int regionSize = 8;
 	glm::ivec2 coords;//in regions
-	std::vector<const Chunk*> chunks;//loaded chunks inside it, pointers stay valid because unordered_map never moves its elements
+	std::vector<Chunk*> chunks;//loaded chunks inside it, pointers stay valid because unordered_map never moves its elements
+	MeshAllocation merged;//sections in each chunk's mergedSections, copied end to end
+	double dirtyTime = 0.0;//last time something in it changed (nowSeconds), it's merged again once that settles
+
+	glm::vec3 origin() const {//world position of its corner, what every vertex in it is relative to
+		float width = static_cast<float>(regionSize * Chunk::chunkSize);
+		return glm::vec3(coords.x * width, static_cast<float>(-Chunk::baseTerrainHeight), coords.y * width);
+	}
 };
 
 // What World needs from the camera to pick each column's level of detail
@@ -36,6 +46,7 @@ struct LodView {
 	float zoom = 1.0f;//1 = not zoomed
 	glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);//camera direction, only looked at while zoomed
 	Frustum zoomedView;//what the zoomed camera sees, only set while zoomed
+	Frustum keepView;//a wider view around it, columns inside keep their zoom detail (see World::checkLod)
 };
 
 // Owns every chunk: loading, unloading, generation and meshing jobs, and block access in world coordinates
@@ -67,6 +78,10 @@ public:
 	int getSeed() const { return terrain.getSeed(); }
 
 	void setRenderDistance(int chunks);//can change while playing, chunks load/unload to match
+	// Columns closer than this are drawn one section per draw so edits rebuild quickly, the rest are merged per region
+	// Nothing simulates yet, it's what water, crops etc. would use later. At or above render distance nothing merges
+	void setSimulationDistance(int chunks);
+	int getSimulationDistance() const { return simulationDistance; }
 	int getRenderDistance() const { return renderDistance; }
 
 	// Where each LOD level starts, as a percentage of render distance: 2x blocks, 4x blocks, 8x blocks
@@ -122,8 +137,18 @@ private:
 	//only touched on the main thread, worker threads get copies (see ChunkMeshInput)
 	std::unordered_map<uint64_t, Chunk> chunks;
 	std::unordered_map<uint64_t, ChunkRegion> regions;//same chunks grouped for culling, kept in step with chunks
-	void addToRegion(uint64_t key, const Chunk& chunk);
-	void removeFromRegion(uint64_t key, const Chunk& chunk);
+	void addToRegion(uint64_t key, Chunk& chunk);
+	void removeFromRegion(uint64_t key, Chunk& chunk);
+
+	// merged region meshes
+	int simulationDistance = 16;
+	std::unordered_set<uint64_t> dirtyRegions;//region keys whose merged mesh is out of date
+	bool mergesColumn(uint64_t key) const;//outside simulation distance, so it belongs in its region's merged mesh
+	void markRegionDirty(uint64_t chunkKey);//something in this chunk's region changed
+	void sectionMeshChanged(uint64_t key, Chunk& chunk, int section);//marks its region if the merged mesh is affected
+	void checkSimulationBoundary();//player moved: regions where a column crossed simulation distance need merging again
+	void rebuildRegion(ChunkRegion& region);
+	void rebuildDirtyRegions();//the ones that have settled, within a time budget
 
 	// A mesh being built on a worker, editTime is the edit it includes (-1 if it was not started by an edit)
 	struct MeshJob {
@@ -177,16 +202,22 @@ private:
 	LodView lodView;//from the last update
 	bool lodsChanged = true;//settings or render distance changed, every column needs checking
 	glm::vec3 lastLodForward = glm::vec3(0.0f);//camera direction when the zoomed view was last checked
-	std::vector<uint64_t> zoomUpgraded;//columns given more detail while zoomed, the only ones to check when zoom ends
+	// Regions waiting for their columns' levels to be checked, worked through a little each frame (processLodQueue)
+	// Zooming at render distance 200 changes the level of tens of thousands of columns at once,
+	// doing them all in one frame was a 80-740 ms freeze
+	std::deque<uint64_t> lodQueue;
+	std::unordered_set<uint64_t> lodQueued;//what's in lodQueue, so a region is never in it twice
+	std::unordered_set<uint64_t> zoomRegions;//regions with a column at more detail because of zoom (Chunk::zoomDetail)
+	void queueRegionLods(uint64_t regionKey);
+	void processLodQueue();
 	float lodStart(int level) const;//distance in chunks where a level starts, infinity if it's switched off
 	int lodForDistance(float chunks) const;//level for something this many chunks away, ignoring zoom
 	int targetLod(uint64_t key, const Chunk& chunk) const;//level the column should be at right now
 	// Each of these re-picks levels for some columns and queues a remesh for the ones that changed (checkLod)
 	// Looking at all 160k columns at render distance 200 takes ~20 ms, so only the full one does that
 	void checkLod(uint64_t key, Chunk& chunk);
-	void updateAllLods();//settings changed
+	void updateAllLods();//settings changed: queues every region
 	void updateLodRings(float moved);//player moved this many chunks: only columns near a level boundary can change
-	void updateZoomedLods();//columns inside the zoomed view
-	void endZoomLods();//zoom ended: zoomUpgraded go back to normal
+	void updateZoomedLods();//zoom changed or the view turned: queues the regions in view and the ones with zoom detail
 	void refreshMeshHeap();//new distances after the player moved, and gives parked sections another chance
 };

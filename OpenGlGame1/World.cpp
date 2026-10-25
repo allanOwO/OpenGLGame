@@ -24,6 +24,15 @@ static const double initialMeshingBudgetSeconds = 0.004;
 // (every chunk crossed loads a row of chunks and moves the LOD rings). The time budgets above still keep frames smooth
 static const size_t meshJobsPerWorker = 8;
 
+// A region is merged again once nothing in it has changed for this long, so a region that's streaming in
+// (64 columns, each meshed and then remeshed as neighbours arrive) is copied once instead of dozens of times
+// Until then the new sections are drawn on their own, so nothing is missing in the meantime
+static const double regionSettleSeconds = 0.25;
+static const double mergeBudgetSeconds = 0.001;
+static const double lodBudgetSeconds = 0.001;//main thread time per frame for re-picking levels of detail
+
+static float chunkDistance(uint64_t key, const glm::ivec3& playerChunk);//defined with the LOD code
+
 static int floorDiv(int a, int b) {
     return static_cast<int>(std::floor(static_cast<float>(a) / b));
 }
@@ -46,7 +55,7 @@ bool World::isLoadedAt(const glm::vec3& worldPos) const {
 
 bool World::isFullyLoaded() const {
     if (isInitialLoading || loadCursor < loadOrder.size()) return false;
-    if (!chunkGenerationFutures.empty() || !chunkMeshFutures.empty()) return false;
+    if (!chunkGenerationFutures.empty() || !chunkMeshFutures.empty() || !dirtyRegions.empty() || !lodQueue.empty()) return false;
     // Parked sections are outside render distance, so they don't count
     return meshHeap.empty();
 }
@@ -65,6 +74,7 @@ WorldStats World::getStats() const {
         for (const ChunkSection& section : chunk.sections) stats.blockBytes += section.memoryBytes();
     }
     stats.meshBytes = meshPool.usedBytes();
+    stats.dirtyRegions = static_cast<int>(dirtyRegions.size());
     return stats;
 }
 
@@ -123,6 +133,7 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
         updateActiveChunks();
         unloadFarChunks(playerChunkPos);
         refreshMeshHeap();
+        checkSimulationBoundary();
     }
 
     // Levels of detail, after the block above so distances are from the new player chunk
@@ -135,13 +146,19 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
     else if (moved > 0.0f) {
         updateLodRings(moved);
     }
-    if (zoomChanged && !zoomed) endZoomLods();
-    // Turning while zoomed only needs a recheck once the view has moved a little (1 degree), not every frame
-    if (zoomed && (zoomChanged || moved > 0.0f || glm::dot(view.forward, lastLodForward) < 0.99985f)) {
+    // Turning while zoomed only needs a recheck once the view has turned an eighth of its width
+    // (16x zoom is only ~7 degrees wide, so a fixed angle would be either too often at 4x or too rarely at 16x)
+    float viewWidth = 2.0f * std::atan(1.0f / std::max(view.zoom, 1.0f));//vertical field of view in radians
+    bool turned = glm::dot(view.forward, lastLodForward) < std::cos(std::max(viewWidth / 8.0f, glm::radians(0.5f)));
+    if (zoomChanged || (zoomed && (moved > 0.0f || turned))) {
         updateZoomedLods();
         lastLodForward = view.forward;
     }
     updateTimes.areaMs = msSince(start);
+
+    start = nowSeconds();
+    processLodQueue();
+    updateTimes.lodMs = msSince(start);
 
     start = nowSeconds();
     tryApplyChunkGeneration();//first, so its finished jobs free up workers for updateLoading
@@ -152,6 +169,10 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
     updateTimes.loadMs = msSince(start);
 
     processChunkMeshing(playerPosition);//times its own two halves
+
+    start = nowSeconds();
+    rebuildDirtyRegions();//after meshing, so this frame's uploads are included
+    updateTimes.mergeMs = msSince(start);
 }
 
 // ---------- loading ----------
@@ -177,6 +198,9 @@ void World::rebuildLoadOrder() {
     // Room for everything in range plus the unload margin, so inserting chunks never has to rehash the whole map
     size_t side = static_cast<size_t>(2 * (renderDistance + unloadMargin) + 1);
     chunks.reserve(side * side);
+    // Same for the mesh queue: zooming can queue a few sections for every column at once,
+    // and rehashing 130k entries in the middle of a frame took 10+ ms
+    meshQueue.reserve(side * side * 4);
 }
 
 size_t World::cursorAfterMove(const glm::ivec3& move) const {
@@ -349,6 +373,7 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
     if (chunk.sectionHasNoFaces(key.section, neighbours)) {
         meshPool.release(section.mesh);
         chunk.updateMeshedBit(key.section);
+        sectionMeshChanged(key.column, chunk, key.section);
         section.pendingEditTime = -1.0;
         return false;
     }
@@ -360,9 +385,13 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
     section.pendingEditTime = -1.0;
     JobTimer* timer = &meshTimer;
     int lod = chunk.lod;
-    job.future = workers.submit([input = std::move(input), timer, lod]() {
+    int chunkX = chunkKeyX(key.column), chunkZ = chunkKeyZ(key.column);
+    uint16_t place = packPlace(chunkX - floorDiv(chunkX, ChunkRegion::regionSize) * ChunkRegion::regionSize,
+        chunkZ - floorDiv(chunkZ, ChunkRegion::regionSize) * ChunkRegion::regionSize, key.section);
+    job.future = workers.submit([input = std::move(input), timer, lod, place]() {
         double start = nowSeconds();
         MeshData mesh = Chunk::buildMesh(input, lod);
+        for (PackedVertex& vertex : mesh.vertices) vertex.place = place;
         timer->add(nowSeconds() - start);
         return mesh;
         });
@@ -388,6 +417,7 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
             meshPool.upload(chunk->sections[it->first.section].mesh, mesh.vertices);
             chunk->sections[it->first.section].meshLod = job.lod;
             chunk->updateMeshedBit(it->first.section);
+            sectionMeshChanged(it->first.column, *chunk, it->first.section);
             // The edit is on screen from the next frame
             if (job.editTime >= 0.0) editLatencyTimer.add(nowSeconds() - job.editTime);
         }// else the chunk was unloaded while meshing
@@ -456,23 +486,153 @@ static uint64_t regionKeyFor(uint64_t chunkKey) {
     return getChunkKey(floorDiv(chunkKeyX(chunkKey), ChunkRegion::regionSize), floorDiv(chunkKeyZ(chunkKey), ChunkRegion::regionSize));
 }
 
-void World::addToRegion(uint64_t key, const Chunk& chunk) {
+void World::addToRegion(uint64_t key, Chunk& chunk) {
     uint64_t regionKey = regionKeyFor(key);
     ChunkRegion& region = regions[regionKey];
     region.coords = glm::ivec2(chunkKeyX(regionKey), chunkKeyZ(regionKey));
     region.chunks.push_back(&chunk);
 }
 
-void World::removeFromRegion(uint64_t key, const Chunk& chunk) {
+void World::removeFromRegion(uint64_t key, Chunk& chunk) {
     auto it = regions.find(regionKeyFor(key));
     if (it == regions.end()) return;
-    std::vector<const Chunk*>& list = it->second.chunks;
+    std::vector<Chunk*>& list = it->second.chunks;
     auto found = std::find(list.begin(), list.end(), &chunk);//at most 64, order doesn't matter
     if (found != list.end()) {
         *found = list.back();
         list.pop_back();
     }
-    if (list.empty()) regions.erase(it);
+    if (list.empty()) {
+        meshPool.release(it->second.merged);
+        dirtyRegions.erase(it->first);
+        regions.erase(it);
+    }
+    else if (chunk.mergedSections != 0) {
+        markRegionDirty(key);//its merged mesh still has this chunk in it
+    }
+}
+
+// ---------- merged regions ----------
+
+void World::setSimulationDistance(int chunks) {
+    if (chunks == simulationDistance) return;
+    simulationDistance = chunks;
+    for (const auto& pair : regions) dirtyRegions.insert(pair.first);//every column might be on the other side now
+}
+
+bool World::mergesColumn(uint64_t key) const {
+    return simulationDistance < renderDistance && chunkDistance(key, lastPlayerChunk) > simulationDistance;
+}
+
+void World::markRegionDirty(uint64_t chunkKey) {
+    uint64_t regionKey = regionKeyFor(chunkKey);
+    auto it = regions.find(regionKey);
+    if (it == regions.end()) return;
+    it->second.dirtyTime = nowSeconds();
+    dirtyRegions.insert(regionKey);
+}
+
+void World::sectionMeshChanged(uint64_t key, Chunk& chunk, int section) {
+    // In the merged mesh: that copy is now old. Outside simulation distance: it should join the merged mesh
+    // Neither (close to the player, the usual case for edits): it's drawn on its own, nothing to redo
+    bool merged = chunk.mergedSections & (1u << section);
+    if (merged) chunk.sections[section].mergedCount = 0;//the merged mesh still draws the old one until it's rebuilt
+    if (merged || mergesColumn(key)) markRegionDirty(key);
+}
+
+void World::checkSimulationBoundary() {
+    // Only regions the simulation distance circle passes through can have a column that crossed it
+    for (auto& pair : regions) {
+        ChunkRegion& region = pair.second;
+        // Nearest and furthest column of the region from the player, per axis then combined
+        int minX = region.coords.x * ChunkRegion::regionSize - lastPlayerChunk.x;
+        int minZ = region.coords.y * ChunkRegion::regionSize - lastPlayerChunk.z;
+        int maxX = minX + ChunkRegion::regionSize - 1, maxZ = minZ + ChunkRegion::regionSize - 1;
+        auto nearest = [](int low, int high) { return low > 0 ? low : (high < 0 ? -high : 0); };
+        float nearX = static_cast<float>(nearest(minX, maxX)), nearZ = static_cast<float>(nearest(minZ, maxZ));
+        float farX = static_cast<float>(std::max(std::abs(minX), std::abs(maxX)));
+        float farZ = static_cast<float>(std::max(std::abs(minZ), std::abs(maxZ)));
+        float sim = static_cast<float>(simulationDistance);
+        if (std::sqrt(nearX * nearX + nearZ * nearZ) > sim + 1.0f) continue;//entirely outside
+        if (std::sqrt(farX * farX + farZ * farZ) < sim - 1.0f) continue;//entirely inside
+
+        for (Chunk* chunk : region.chunks) {
+            int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;
+            int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
+            uint64_t key = getChunkKey(chunkX, chunkZ);
+            if (chunk->mergeWanted != mergesColumn(key)) {
+                markRegionDirty(key);
+                break;
+            }
+        }
+    }
+}
+
+void World::rebuildRegion(ChunkRegion& region) {
+    // Each section's newest vertices are either its own mesh (meshed since the last merge, or never merged)
+    // or its slice of the current merged mesh. The new merged mesh is copied together from those
+    struct Member { ChunkSection* section; GLint offset; };
+    std::vector<MeshRange> parts;
+    std::vector<Member> members;
+    GLint offset = 0;
+    for (Chunk* chunk : region.chunks) {
+        int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;
+        int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
+        chunk->mergeWanted = mergesColumn(getChunkKey(chunkX, chunkZ));
+        for (int s = 0; s < Chunk::sectionCount; s++) {
+            ChunkSection& section = chunk->sections[s];
+            bool hasSlice = (chunk->mergedSections & (1u << s)) && section.mergedCount > 0;
+            if (!chunk->mergeWanted) {
+                // Back inside simulation distance: it'll be drawn on its own again, so it needs its own copy back
+                // (done now, the old merged mesh is released at the end of this)
+                if (hasSlice && section.mesh.vertexCount == 0) {
+                    meshPool.combine(section.mesh, { { region.merged.page, region.merged.firstVertex + section.mergedFirst, section.mergedCount } });
+                }
+                section.mergedCount = 0;
+                continue;
+            }
+            MeshRange source{ 0, 0, 0 };
+            if (section.mesh.vertexCount > 0) source = { section.mesh.page, section.mesh.firstVertex, section.mesh.vertexCount };
+            else if (hasSlice) source = { region.merged.page, region.merged.firstVertex + section.mergedFirst, section.mergedCount };
+            if (source.count == 0) continue;//nothing to draw
+            parts.push_back(source);
+            members.push_back({ &section, offset });
+            offset += source.count;
+        }
+    }
+    meshPool.combine(region.merged, parts);
+
+    // Every member now lives in the merged mesh only, and is drawn as part of it instead of on its own
+    for (Chunk* chunk : region.chunks) chunk->mergedSections = 0;
+    for (const Member& member : members) {
+        member.section->mergedFirst = member.offset;
+        member.section->mergedCount = static_cast<GLsizei>(parts[&member - members.data()].count);
+        meshPool.release(member.section->mesh);
+    }
+    for (Chunk* chunk : region.chunks) {
+        for (int s = 0; s < Chunk::sectionCount; s++) {
+            if (chunk->sections[s].mergedCount > 0) chunk->mergedSections |= static_cast<uint16_t>(1u << s);
+            chunk->updateMeshedBit(s);
+        }
+    }
+}
+
+void World::rebuildDirtyRegions() {
+    double start = nowSeconds();
+    for (auto it = dirtyRegions.begin(); it != dirtyRegions.end();) {
+        if (nowSeconds() - start > mergeBudgetSeconds) break;//rest next frame
+        auto region = regions.find(*it);
+        if (region == regions.end()) {
+            it = dirtyRegions.erase(it);
+            continue;
+        }
+        if (start - region->second.dirtyTime < regionSettleSeconds) {
+            ++it;//still changing
+            continue;
+        }
+        rebuildRegion(region->second);
+        it = dirtyRegions.erase(it);
+    }
 }
 
 void World::requestMesh(const SectionKey& key) {
@@ -544,23 +704,55 @@ int World::targetLod(uint64_t key, const Chunk& chunk) const {
 static const float lodHysteresisChunks = 1.0f;
 
 void World::checkLod(uint64_t key, Chunk& chunk) {
-    bool zoomed = lodView.zoom > 1.0f;
+    float distance = chunkDistance(key, lastPlayerChunk);
     int current = chunk.lod;
     int want = targetLod(key, chunk);
     if (want > current) {
-        // While zoomed, detail is only ever added: looking around would otherwise remesh everything
-        // the view sweeps past twice (up on the way in, down on the way out). It all drops back when zoom ends
-        if (zoomed) return;
-        want = std::max(current, lodForDistance(std::max(0.0f, chunkDistance(key, lastPlayerChunk) - lodHysteresisChunks)));
+        // Still near the zoomed view: keep the detail, so panning back and forth doesn't remesh it every time
+        glm::vec3 min = chunk.chunkPosition;
+        glm::vec3 max = min + glm::vec3(Chunk::chunkSize, Chunk::chunkHeight, Chunk::chunkSize);
+        bool nearView = lodView.zoom > 1.0f && lodView.keepView.isBoxInFrustum(min, max);
+        if (!nearView) want = std::max(current, lodForDistance(std::max(0.0f, distance - lodHysteresisChunks)));
+        else want = current;
     }
-    if (want == current) return;
-    if (zoomed) zoomUpgraded.push_back(key);
-    chunk.lod = static_cast<uint8_t>(want);
-    requestColumnMesh(key);//the old mesh stays on screen until the new one is uploaded, so nothing flickers
+    if (want != current) {
+        chunk.lod = static_cast<uint8_t>(want);
+        requestColumnMesh(key);//the old mesh stays on screen until the new one is uploaded, so nothing flickers
+    }
+    chunk.zoomDetail = chunk.lod < lodForDistance(distance);
+    if (chunk.zoomDetail) zoomRegions.insert(regionKeyFor(key));//so it's found again when zoom ends
+}
+
+void World::queueRegionLods(uint64_t regionKey) {
+    if (lodQueued.insert(regionKey).second) lodQueue.push_back(regionKey);
+}
+
+void World::processLodQueue() {
+    // A region (up to 64 columns) at a time, so the budget is checked often enough without timing every column
+    double start = nowSeconds();
+    while (!lodQueue.empty() && nowSeconds() - start < lodBudgetSeconds) {
+        uint64_t regionKey = lodQueue.front();
+        lodQueue.pop_front();
+        lodQueued.erase(regionKey);
+        auto it = regions.find(regionKey);
+        if (it == regions.end()) {
+            zoomRegions.erase(regionKey);//unloaded
+            continue;
+        }
+        bool anyZoomDetail = false;
+        for (Chunk* chunk : it->second.chunks) {
+            int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;//positions are whole chunks
+            int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
+            checkLod(getChunkKey(chunkX, chunkZ), *chunk);
+            anyZoomDetail |= chunk->zoomDetail;
+        }
+        if (anyZoomDetail) zoomRegions.insert(regionKey);
+        else zoomRegions.erase(regionKey);
+    }
 }
 
 void World::updateAllLods() {
-    for (auto& pair : chunks) checkLod(pair.first, pair.second);
+    for (const auto& pair : regions) queueRegionLods(pair.first);
 }
 
 void World::updateLodRings(float moved) {
@@ -585,29 +777,27 @@ void World::updateLodRings(float moved) {
     }
 }
 
-void World::endZoomLods() {
-    std::vector<uint64_t> keys = std::move(zoomUpgraded);
-    zoomUpgraded.clear();
-    for (uint64_t key : keys) {
-        if (Chunk* chunk = findChunk(chunkKeyX(key), chunkKeyZ(key))) checkLod(key, *chunk);//unloaded ones are gone anyway
-    }
-}
-
 void World::updateZoomedLods() {
-    // Just the regions the zoomed view can see, the same test the renderer uses to skip them
+    // Regions with zoom detail first: they may have left the view (or zoom ended) and can drop back
+    // Only regions are queued here, the columns are checked over the next frames by processLodQueue
+    for (uint64_t regionKey : zoomRegions) queueRegionLods(regionKey);
+    if (lodView.zoom <= 1.0f) return;
+
+    // Then the regions the zoomed view can see, the same test the renderer uses to skip them
+    // Nearest first, so the detail fills in from the middle of the view outwards
     const float regionWidth = static_cast<float>(ChunkRegion::regionSize * Chunk::chunkSize);
     const float bottom = static_cast<float>(-Chunk::baseTerrainHeight);
+    std::vector<std::pair<int, uint64_t>> inView;//distance squared in regions, key
+    glm::ivec2 playerRegion(floorDiv(lastPlayerChunk.x, ChunkRegion::regionSize), floorDiv(lastPlayerChunk.z, ChunkRegion::regionSize));
     for (const auto& pair : regions) {
         glm::vec3 min(pair.second.coords.x * regionWidth, bottom, pair.second.coords.y * regionWidth);
         glm::vec3 max = min + glm::vec3(regionWidth, static_cast<float>(Chunk::chunkHeight), regionWidth);
         if (!lodView.zoomedView.isBoxInFrustum(min, max)) continue;
-        for (const Chunk* regionChunk : pair.second.chunks) {
-            // Regions only hold const pointers, so find the chunk again by its key (positions are whole chunks)
-            int chunkX = static_cast<int>(regionChunk->chunkPosition.x) / Chunk::chunkSize;
-            int chunkZ = static_cast<int>(regionChunk->chunkPosition.z) / Chunk::chunkSize;
-            if (Chunk* chunk = findChunk(chunkX, chunkZ)) checkLod(getChunkKey(chunkX, chunkZ), *chunk);
-        }
+        glm::ivec2 offset = pair.second.coords - playerRegion;
+        inView.push_back({ offset.x * offset.x + offset.y * offset.y, pair.first });
     }
+    std::sort(inView.begin(), inView.end());
+    for (const auto& entry : inView) queueRegionLods(entry.second);
 }
 
 // ---------- block access ----------

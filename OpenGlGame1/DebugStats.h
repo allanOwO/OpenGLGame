@@ -46,6 +46,8 @@ struct UpdateTimes {
 	float loadMs = 0.0f;//starting generation jobs
 	float uploadMs = 0.0f;//copying finished meshes to the GPU
 	float launchMs = 0.0f;//choosing chunks to mesh and copying their blocks for the workers
+	float mergeMs = 0.0f;//copying region meshes together on the GPU
+	float lodMs = 0.0f;//re-picking levels of detail (zooming, turning while zoomed, settings)
 };
 
 // What the renderer drew last frame
@@ -56,7 +58,8 @@ struct RenderStats {
 	int drawCalls = 0;//main pass only, 1 since everything goes in one multi draw
 	int drawCommands = 0;//draws inside that call, one per visible section
 	int64_t triangles = 0;
-	int sectionsByLod[4] = {};//drawn sections at each level of detail, 0 = full detail
+	int sectionsByLod[4] = {};//sections drawn on their own at each level of detail, 0 = full detail
+	int mergedRegionsDrawn = 0;//regions drawn as one merged mesh, part of drawCommands
 	int shadowDrawCalls = 0;
 	int64_t shadowTriangles = 0;
 };
@@ -72,4 +75,5 @@ struct WorldStats {
 	JobTotals editLatency;//block edit -> new mesh uploaded, includes waiting in the queue
 	size_t blockBytes = 0;//CPU memory for block arrays
 	size_t meshBytes = 0;//GPU memory for vertex + index buffers
+	int dirtyRegions = 0;//waiting to be merged again
 };
