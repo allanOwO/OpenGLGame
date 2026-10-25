@@ -54,7 +54,9 @@ namespace {
 }
 
 Benchmark::Benchmark(const World& world, int screenWidth, int screenHeight)
-	: renderDistance(world.getRenderDistance()), screenWidth(screenWidth), screenHeight(screenHeight),
+	: renderDistance(world.getRenderDistance()),
+	lodText("LOD " + std::to_string(world.getLodPercent(0)) + "/" + std::to_string(world.getLodPercent(1)) + "/" + std::to_string(world.getLodPercent(2)) + "%"),
+	screenWidth(screenWidth), screenHeight(screenHeight),
 	runName("benchmark_" + timestamp("%Y-%m-%d_%H-%M-%S")) {
 
 	// Sample the terrain along the flight path once, so the path is the same every run
@@ -297,7 +299,7 @@ std::vector<std::string> Benchmark::finish() {
 	};
 
 	std::vector<std::string> lines = {
-		"SEED " + std::to_string(seed) + "  RENDER DISTANCE " + std::to_string(renderDistance)
+		"SEED " + std::to_string(seed) + "  RENDER DISTANCE " + std::to_string(renderDistance) + "  " + lodText
 			+ "  " + std::to_string(screenWidth) + "X" + std::to_string(screenHeight) + "  " + build,
 		gpu,
 		"",

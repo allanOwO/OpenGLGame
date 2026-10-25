@@ -27,8 +27,12 @@ public:
 
 	// highlight can be nullptr when the player isn't looking at a block
 	// farPlane should reach past the furthest loaded chunk or the edge of the world gets cut off
+	// zoom 1 is the normal 90 degree view, 4 makes everything look 4 times bigger
 	void render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
-		int width, int height, float time, float farPlane, const RaycastHit* highlight);
+		int width, int height, float time, float farPlane, float zoom, const RaycastHit* highlight);
+
+	// The camera's projection, also used by Main to tell World what a zoomed view would see
+	static glm::mat4 projection(float zoom, float aspect, float farPlane);
 
 	const RenderStats& getStats() const { return stats; }//counts from the last render()
 	// GPU time of a recent render(), a few frames behind

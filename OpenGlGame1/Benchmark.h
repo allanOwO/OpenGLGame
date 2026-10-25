@@ -93,6 +93,7 @@ private:
 	std::vector<float> heights;
 
 	int renderDistance;
+	std::string lodText;//where each LOD level started, LOD changes the results so the report says what it was
 	int screenWidth, screenHeight;
 	std::string runName;//benchmark_<start time>, shared by the report and screenshots
 	int screenshotsTaken = 0;

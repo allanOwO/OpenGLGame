@@ -22,6 +22,7 @@ struct ChunkSection {
 	BlockType fill = BlockType::AIR;
 
 	MeshAllocation mesh;//where its mesh is in World's ChunkMeshPool, World uploads and releases it
+	uint8_t meshLod = 0;//detail level the current mesh was built at (see Chunk::lod), for the debug overlay
 	bool rebuildNeeded = true;
 	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
 
@@ -68,7 +69,16 @@ public:
 	// True when the section can't have any visible faces: all air, or solid with solid sections all around it
 	// (most of the world underground), so it needs no mesh job at all
 	bool sectionHasNoFaces(int section, const Chunk* const neighbours[8]) const;
-	static MeshData buildMesh(const ChunkMeshInput& input);//greedy meshing with ambient occlusion
+	static MeshData buildMesh(const ChunkMeshInput& input, int lod = 0);//greedy meshing with ambient occlusion
+
+	// Level of detail: far away a block is a few pixels, so drawing every one wastes triangles
+	// Level 0 is full detail, each level after doubles the block size: 1 LOD block = 2x2x2, 4x4x4, then 8x8x8 real blocks
+	// Only the mesh changes, the real blocks are all still there (physics, saving and editing never see LOD)
+	static constexpr int lodLevels = 4;
+	static int lodScale(int lod) { return 1 << lod; }
+	// Shrinks a full detail mesh input so each cell covers scale^3 blocks, see Chunk.cpp for how cells are picked
+	static ChunkMeshInput downsample(const ChunkMeshInput& full, int lod);
+	uint8_t lod = 0;//level the whole column is meshed at, World picks it from distance and zoom
 
 	std::array<ChunkSection, sectionCount> sections;
 	glm::vec3 chunkPosition;//world position of the column's bottom corner

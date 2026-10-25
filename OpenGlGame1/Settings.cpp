@@ -24,12 +24,18 @@ bool Settings::load(const std::string& path) {
 			if (key == "renderDistance") {
 				renderDistance = std::clamp(std::stoi(value), minRenderDistance, maxRenderDistance);
 			}
+			else if (key == "lod2xPercent") lod2xPercent = std::clamp(std::stoi(value), 1, 100);
+			else if (key == "lod4xPercent") lod4xPercent = std::clamp(std::stoi(value), 1, 100);
+			else if (key == "lod8xPercent") lod8xPercent = std::clamp(std::stoi(value), 1, 100);
 			// unknown keys are ignored, so files from newer versions still load
 		}
 		catch (const std::exception&) {
 			std::cerr << "settings: bad value for " << key << ", using default" << std::endl;
 		}
 	}
+	// A hand edited file could have them out of order
+	lod4xPercent = std::max(lod4xPercent, lod2xPercent);
+	lod8xPercent = std::max(lod8xPercent, lod4xPercent);
 	return true;
 }
 
@@ -39,5 +45,8 @@ bool Settings::save(const std::string& path) const {
 
 	file << "# Game settings, edited from the settings menu\n";
 	file << "renderDistance=" << renderDistance << "\n";
+	file << "lod2xPercent=" << lod2xPercent << "\n";
+	file << "lod4xPercent=" << lod4xPercent << "\n";
+	file << "lod8xPercent=" << lod8xPercent << "\n";
 	return static_cast<bool>(file);
 }

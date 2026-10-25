@@ -38,8 +38,10 @@ void Player::processMouseMovement(double xpos, double ypos) {
     lastX = xpos;
     lastY = ypos;
 
-    xoffset *= lookSens;
-    yoffset *= lookSens;
+    // Zoomed in, the same mouse movement would sweep across far more of the (now tiny) view,
+    // so turning slows down by the zoom to feel the same on screen
+    xoffset *= lookSens / zoom;
+    yoffset *= lookSens / zoom;
 
     //add offset to stored rotation values
     yaw += xoffset;
@@ -52,6 +54,27 @@ void Player::setLook(float newYaw, float newPitch) {
     yaw = newYaw;
     pitch = newPitch;
     updateCameraFront();
+}
+
+void Player::toggleZoom() {
+    zoomed = !zoomed;
+    targetZoom = defaultZoom;//every zoom starts at the same level
+}
+
+void Player::scrollZoom(float notches) {
+    if (!zoomed || notches == 0.0f) return;
+    // Multiplying per notch instead of adding means every notch feels like the same step,
+    // 2x -> 2.5x is as noticeable as 8x -> 10x
+    targetZoom = glm::clamp(targetZoom * std::pow(1.25f, notches), minZoom, maxZoom);
+}
+
+void Player::updateZoom(float deltaTime) {
+    // Covers most of the gap each frame, the same fraction per second at any frame rate (like the friction)
+    // Eased in log space for the same reason as scrollZoom, so 1x -> 4x doesn't rush the first half
+    float target = getTargetZoom();
+    float t = 1.0f - std::exp(-deltaTime * 15.0f);
+    zoom = std::exp(glm::mix(std::log(zoom), std::log(target), t));
+    if (std::abs(zoom - target) < 0.001f) zoom = target;
 }
 
 void Player::updateCameraFront() {

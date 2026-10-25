@@ -18,6 +18,12 @@ static size_t workerCount() {
 static const double meshingBudgetSeconds = 0.0005;
 static const double initialMeshingBudgetSeconds = 0.004;
 
+// Mesh jobs allowed to be waiting or running at once, per worker
+// A mesh takes ~0.01 ms, so with only one each the workers finished in microseconds and sat idle until next frame:
+// meshing was capped at (workers x frame rate) jobs a second, which flying at render distance 200 needs several times over
+// (every chunk crossed loads a row of chunks and moves the LOD rings). The time budgets above still keep frames smooth
+static const size_t meshJobsPerWorker = 8;
+
 static int floorDiv(int a, int b) {
     return static_cast<int>(std::floor(static_cast<float>(a) / b));
 }
@@ -91,7 +97,7 @@ World::~World() {
     for (auto& pair : chunkMeshFutures) pair.second.future.wait();
 }
 
-void World::update(const glm::vec3& playerPosition) {
+void World::update(const glm::vec3& playerPosition, const LodView& view) {
     // Calculate the player's chunk position in chunk coordinates
     glm::ivec3 playerChunkPos(
         static_cast<int>(floor(playerPosition.x / Chunk::chunkSize)),
@@ -105,13 +111,35 @@ void World::update(const glm::vec3& playerPosition) {
     updateTimes = UpdateTimes();
     double start = nowSeconds();
     lastPlayerPosition = playerPosition;
+    bool zoomChanged = view.zoom != lodView.zoom;
+    lodView = view;
+    float moved = 0.0f;//chunks the player moved since the last update, for the LOD rings
     if (areaChanged || playerChunkPos != lastPlayerChunk) {
+        glm::vec2 move(playerChunkPos.x - lastPlayerChunk.x, playerChunkPos.z - lastPlayerChunk.z);
+        moved = glm::length(move);
         loadCursor = areaChanged ? 0 : cursorAfterMove(playerChunkPos - lastPlayerChunk);
         lastPlayerChunk = playerChunkPos;
         areaChanged = false;
         updateActiveChunks();
         unloadFarChunks(playerChunkPos);
         refreshMeshHeap();
+    }
+
+    // Levels of detail, after the block above so distances are from the new player chunk
+    // A big jump (teleport, render distance change) is cheaper to check all at once than as very wide rings
+    bool zoomed = view.zoom > 1.0f;
+    if (lodsChanged || moved > 8.0f) {
+        updateAllLods();
+        lodsChanged = false;
+    }
+    else if (moved > 0.0f) {
+        updateLodRings(moved);
+    }
+    if (zoomChanged && !zoomed) endZoomLods();
+    // Turning while zoomed only needs a recheck once the view has moved a little (1 degree), not every frame
+    if (zoomed && (zoomChanged || moved > 0.0f || glm::dot(view.forward, lastLodForward) < 0.99985f)) {
+        updateZoomedLods();
+        lastLodForward = view.forward;
     }
     updateTimes.areaMs = msSince(start);
 
@@ -144,6 +172,7 @@ void World::rebuildLoadOrder() {
         });
     loadCursor = 0;
     areaChanged = true;
+    lodsChanged = true;//levels start at a percentage of render distance
 
     // Room for everything in range plus the unload margin, so inserting chunks never has to rehash the whole map
     size_t side = static_cast<size_t>(2 * (renderDistance + unloadMargin) + 1);
@@ -243,6 +272,7 @@ void World::tryApplyChunkGeneration(bool waitForAll) {
             auto inserted = chunks.emplace(key, it->second.get());
             Chunk& chunk = inserted.first->second;
             chunk.isActive = isInRange(key);//the player may have moved while it generated
+            chunk.lod = static_cast<uint8_t>(targetLod(key, chunk));//meshed at the right detail straight away
             addToRegion(key, chunk);
             requestColumnMesh(key);
 
@@ -326,11 +356,13 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
     ChunkMeshInput input = chunk.makeMeshInput(key.section, neighbours);
     MeshJob& job = chunkMeshFutures[key];
     job.editTime = section.pendingEditTime;//this job's copy includes that edit
+    job.lod = chunk.lod;
     section.pendingEditTime = -1.0;
     JobTimer* timer = &meshTimer;
-    job.future = workers.submit([input = std::move(input), timer]() {
+    int lod = chunk.lod;
+    job.future = workers.submit([input = std::move(input), timer, lod]() {
         double start = nowSeconds();
-        MeshData mesh = Chunk::buildMesh(input);
+        MeshData mesh = Chunk::buildMesh(input, lod);
         timer->add(nowSeconds() - start);
         return mesh;
         });
@@ -354,6 +386,7 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
         MeshData mesh = job.future.get();
         if (Chunk* chunk = findChunk(chunkKeyX(it->first.column), chunkKeyZ(it->first.column))) {
             meshPool.upload(chunk->sections[it->first.section].mesh, mesh.vertices);
+            chunk->sections[it->first.section].meshLod = job.lod;
             chunk->updateMeshedBit(it->first.section);
             // The edit is on screen from the next frame
             if (job.editTime >= 0.0) editLatencyTimer.add(nowSeconds() - job.editTime);
@@ -367,8 +400,9 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
         ~LaunchTimer() { times.launchMs = static_cast<float>((nowSeconds() - start) * 1000.0); }
     } launchTimer{ updateTimes, start };
 
-    if (chunkMeshFutures.size() >= workers.size()) return;
-    size_t freeSlots = workers.size() - chunkMeshFutures.size();
+    size_t maxJobs = workers.size() * meshJobsPerWorker;
+    if (chunkMeshFutures.size() >= maxJobs) return;
+    size_t freeSlots = maxJobs - chunkMeshFutures.size();
 
     // Nearest queued sections first, straight off the heap
     // Sections that turn out to have no faces finish here without a job, so they don't use up a worker
@@ -456,6 +490,123 @@ void World::requestColumnMesh(uint64_t key) {
         // All air with nothing drawn: neighbours changing can't give it faces, skip it (most of the sky)
         if (section.isEmpty() && section.mesh.capacity == 0) continue;
         requestMesh({ key, s });
+    }
+}
+
+// ---------- level of detail ----------
+
+void World::setLodDistances(int percent2x, int percent4x, int percent8x) {
+    if (percent2x == lodPercent[0] && percent4x == lodPercent[1] && percent8x == lodPercent[2]) return;
+    lodPercent[0] = percent2x;
+    lodPercent[1] = percent4x;
+    lodPercent[2] = percent8x;
+    lodsChanged = true;
+}
+
+float World::lodStart(int level) const {
+    // Each level starts at its percentage of render distance, and never closer than the level before it
+    float start = minFullDetailChunks;
+    for (int i = 0; i < level; i++) {
+        if (lodPercent[i] >= 100) return std::numeric_limits<float>::infinity();//this level and the coarser ones are off
+        start = std::max(start, lodPercent[i] * 0.01f * renderDistance);
+    }
+    return start;
+}
+
+int World::lodForDistance(float chunks) const {
+    int lod = 0;
+    while (lod + 1 < Chunk::lodLevels && chunks >= lodStart(lod + 1)) lod++;
+    return lod;
+}
+
+// Distance in chunks from the player's chunk to a column, circular like the load order
+static float chunkDistance(uint64_t key, const glm::ivec3& playerChunk) {
+    float dx = static_cast<float>(chunkKeyX(key) - playerChunk.x);
+    float dz = static_cast<float>(chunkKeyZ(key) - playerChunk.z);
+    return std::sqrt(dx * dx + dz * dz);
+}
+
+int World::targetLod(uint64_t key, const Chunk& chunk) const {
+    float distance = chunkDistance(key, lastPlayerChunk);
+    int lod = lodForDistance(distance);
+    // 4x zoom makes something 40 chunks away look like it's 10 away, so it gets the detail of 10 chunks away
+    // Only inside the zoomed view though, the columns behind you don't look any closer
+    if (lodView.zoom > 1.0f && lod > 0) {
+        glm::vec3 min = chunk.chunkPosition;
+        glm::vec3 max = min + glm::vec3(Chunk::chunkSize, Chunk::chunkHeight, Chunk::chunkSize);
+        if (lodView.zoomedView.isBoxInFrustum(min, max)) lod = std::min(lod, lodForDistance(distance / lodView.zoom));
+    }
+    return lod;
+}
+
+// How far past a boundary a column has to get before it drops to less detail
+// Without it a column right on the line would flip back and forth (and remesh) as the player walks along it
+static const float lodHysteresisChunks = 1.0f;
+
+void World::checkLod(uint64_t key, Chunk& chunk) {
+    bool zoomed = lodView.zoom > 1.0f;
+    int current = chunk.lod;
+    int want = targetLod(key, chunk);
+    if (want > current) {
+        // While zoomed, detail is only ever added: looking around would otherwise remesh everything
+        // the view sweeps past twice (up on the way in, down on the way out). It all drops back when zoom ends
+        if (zoomed) return;
+        want = std::max(current, lodForDistance(std::max(0.0f, chunkDistance(key, lastPlayerChunk) - lodHysteresisChunks)));
+    }
+    if (want == current) return;
+    if (zoomed) zoomUpgraded.push_back(key);
+    chunk.lod = static_cast<uint8_t>(want);
+    requestColumnMesh(key);//the old mesh stays on screen until the new one is uploaded, so nothing flickers
+}
+
+void World::updateAllLods() {
+    for (auto& pair : chunks) checkLod(pair.first, pair.second);
+}
+
+void World::updateLodRings(float moved) {
+    // Moving `moved` chunks changes every distance by at most that much, so a column can only change level
+    // if it was or now is within that of a boundary (plus the hysteresis on the way out)
+    // loadOrder is every offset sorted by distance, so each ring is one slice of it found by binary search
+    auto firstAtLeast = [&](float distance) {
+        float squared = std::max(0.0f, distance) * std::max(0.0f, distance);
+        return std::partition_point(loadOrder.begin(), loadOrder.end(), [squared](const glm::ivec2& o) {
+            return static_cast<float>(o.x * o.x + o.y * o.y) < squared;
+        });
+    };
+    for (int level = 1; level < Chunk::lodLevels; level++) {
+        float start = lodStart(level);
+        if (start > renderDistance * 1.5f) break;//off, or past the corners of the loaded square
+        auto first = firstAtLeast(start - moved - 1.0f);
+        auto last = firstAtLeast(start + lodHysteresisChunks + moved + 1.0f);
+        for (auto it = first; it != last; ++it) {
+            int chunkX = lastPlayerChunk.x + it->x, chunkZ = lastPlayerChunk.z + it->y;
+            if (Chunk* chunk = findChunk(chunkX, chunkZ)) checkLod(getChunkKey(chunkX, chunkZ), *chunk);
+        }
+    }
+}
+
+void World::endZoomLods() {
+    std::vector<uint64_t> keys = std::move(zoomUpgraded);
+    zoomUpgraded.clear();
+    for (uint64_t key : keys) {
+        if (Chunk* chunk = findChunk(chunkKeyX(key), chunkKeyZ(key))) checkLod(key, *chunk);//unloaded ones are gone anyway
+    }
+}
+
+void World::updateZoomedLods() {
+    // Just the regions the zoomed view can see, the same test the renderer uses to skip them
+    const float regionWidth = static_cast<float>(ChunkRegion::regionSize * Chunk::chunkSize);
+    const float bottom = static_cast<float>(-Chunk::baseTerrainHeight);
+    for (const auto& pair : regions) {
+        glm::vec3 min(pair.second.coords.x * regionWidth, bottom, pair.second.coords.y * regionWidth);
+        glm::vec3 max = min + glm::vec3(regionWidth, static_cast<float>(Chunk::chunkHeight), regionWidth);
+        if (!lodView.zoomedView.isBoxInFrustum(min, max)) continue;
+        for (const Chunk* regionChunk : pair.second.chunks) {
+            // Regions only hold const pointers, so find the chunk again by its key (positions are whole chunks)
+            int chunkX = static_cast<int>(regionChunk->chunkPosition.x) / Chunk::chunkSize;
+            int chunkZ = static_cast<int>(regionChunk->chunkPosition.z) / Chunk::chunkSize;
+            if (Chunk* chunk = findChunk(chunkX, chunkZ)) checkLod(getChunkKey(chunkX, chunkZ), *chunk);
+        }
     }
 }
 

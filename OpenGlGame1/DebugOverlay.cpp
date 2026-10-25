@@ -133,6 +133,8 @@ void DebugOverlay::draw(UI& ui, const World& world, const Renderer& renderer,
 			+ "  REGIONS CULLED " + std::to_string(render.regionsCulled), white },
 		{ "DRAW CALLS " + std::to_string(render.drawCalls) + "  SHADOW " + std::to_string(render.shadowDrawCalls), white },
 		{ "TRIANGLES " + compact(render.triangles) + "  SHADOW " + compact(render.shadowTriangles), white },
+		{ "LOD SECTIONS FULL " + std::to_string(render.sectionsByLod[0]) + "  2X " + std::to_string(render.sectionsByLod[1])
+			+ "  4X " + std::to_string(render.sectionsByLod[2]) + "  8X " + std::to_string(render.sectionsByLod[3]), white },
 		{ "", white },
 		{ "WORLD", heading },
 		{ "CHUNKS LOADED " + std::to_string(worldStats.chunksLoaded) + "  ACTIVE " + std::to_string(worldStats.chunksActive), white },

@@ -56,6 +56,7 @@ struct RenderStats {
 	int drawCalls = 0;//main pass only, 1 since everything goes in one multi draw
 	int drawCommands = 0;//draws inside that call, one per visible section
 	int64_t triangles = 0;
+	int sectionsByLod[4] = {};//drawn sections at each level of detail, 0 = full detail
 	int shadowDrawCalls = 0;
 	int64_t shadowTriangles = 0;
 };

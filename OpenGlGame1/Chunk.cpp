@@ -143,6 +143,69 @@ ChunkMeshInput Chunk::makeMeshInput(int sectionIndex, const Chunk* const neighbo
 	return input;
 }
 
+// ---------- level of detail ----------
+
+// Each LOD cell covers scale^3 real blocks, and it has to answer one question: solid or air?
+//
+// Cells inside the section are solid if ANY block in them is solid. That makes far terrain a little bigger
+// than the real thing (up to scale - 1 blocks), never smaller, which is what stops holes:
+// whatever the neighbour sections are meshed at, every real solid block is inside something that gets drawn
+//
+// Border cells (the neighbours) go the other way: solid only if EVERY block we can see of them is solid
+// A face is only skipped when it's against a border cell, so this way a face is never skipped unless
+// the neighbour really is solid there, at any detail level the neighbour happens to be at
+// The cost is a few hidden faces where neighbours bulge into each other, a lot cheaper than finding out their level
+//
+// The border is only 1 block thick, so a border cell is really just that 1 block layer, scale x scale of it
+ChunkMeshInput Chunk::downsample(const ChunkMeshInput& full, int lod) {
+	const int scale = lodScale(lod);
+	const int S = ChunkSection::size;
+	ChunkMeshInput coarse;
+	coarse.size = S / scale;
+	const int n = coarse.size;
+	const int P = coarse.padded();
+	coarse.blocks.resize(static_cast<size_t>(P) * P * P);
+
+	// Real blocks a coarse coordinate covers on one axis: the border is the single padding layer
+	auto range = [&](int c, int& first, int& last) {
+		if (c < 0) { first = last = -1; }
+		else if (c >= n) { first = last = S; }
+		else { first = c * scale; last = first + scale - 1; }
+	};
+
+	for (int cy = -1; cy <= n; cy++) {
+		for (int cz = -1; cz <= n; cz++) {
+			for (int cx = -1; cx <= n; cx++) {
+				int x0, x1, y0, y1, z0, z1;
+				range(cx, x0, x1);
+				range(cy, y0, y1);
+				range(cz, z0, z1);
+				bool border = cx < 0 || cx >= n || cy < 0 || cy >= n || cz < 0 || cz >= n;
+
+				BlockType cell = BlockType::AIR;
+				if (border) {
+					// All solid or it counts as air. Which solid block doesn't matter, only inside cells are drawn
+					cell = BlockType::STONE;
+					for (int y = y0; y <= y1 && cell != BlockType::AIR; y++)
+						for (int z = z0; z <= z1 && cell != BlockType::AIR; z++)
+							for (int x = x0; x <= x1; x++)
+								if (full.get(x, y, z) == BlockType::AIR) { cell = BlockType::AIR; break; }
+				}
+				else {
+					// Any solid block makes it solid. Its texture is the highest block in it,
+					// top down so a hillside cell shows the grass on top instead of the stone underneath
+					for (int y = y1; y >= y0 && cell == BlockType::AIR; y--)
+						for (int z = z0; z <= z1 && cell == BlockType::AIR; z++)
+							for (int x = x0; x <= x1; x++)
+								if (full.get(x, y, z) != BlockType::AIR) { cell = full.get(x, y, z); break; }
+				}
+				coarse.blocks[(static_cast<size_t>(cy + 1) * P + (cz + 1)) * P + (cx + 1)] = cell;
+			}
+		}
+	}
+	return coarse;
+}
+
 bool Chunk::sectionHasNoFaces(int sectionIndex, const Chunk* const neighbours[8]) const {
 	const ChunkSection& section = sections[sectionIndex];
 	if (section.isEmpty()) return true;//faces belong to solid blocks, air has none
@@ -175,16 +238,18 @@ static int faceIndex(int axis, int direction) {
 // The padded input as bits: rows[y + 1][z + 1] has bit x + 1 set when that block is solid
 // One 32 bit row covers the whole x range (-1 to 16), so checking a block is a shift instead of an array lookup,
 // and whole rows can be compared at once to find which slices have any faces at all
+// LOD inputs are smaller (size 8, 4 or 2), they just use less of each row
 struct SolidRows {
 	static constexpr int P = ChunkMeshInput::paddedSize;
-	static constexpr uint32_t inner = 0x1FFFE;//bits for x = 0 to 15, leaving out the border on each side
+	int size;
+	uint32_t inner;//bits for x = 0 to size - 1, leaving out the border on each side
 	uint32_t rows[P][P];
 
-	explicit SolidRows(const ChunkMeshInput& input) {
-		for (int y = -1; y <= ChunkSection::size; y++) {
-			for (int z = -1; z <= ChunkSection::size; z++) {
+	explicit SolidRows(const ChunkMeshInput& input) : size(input.size), inner(((1u << input.size) - 1) << 1) {
+		for (int y = -1; y <= size; y++) {
+			for (int z = -1; z <= size; z++) {
 				uint32_t bits = 0;
-				for (int x = -1; x <= ChunkSection::size; x++) {
+				for (int x = -1; x <= size; x++) {
 					if (input.get(x, y, z) != BlockType::AIR) bits |= 1u << (x + 1);
 				}
 				rows[y + 1][z + 1] = bits;
@@ -197,7 +262,7 @@ struct SolidRows {
 	// Bit i set = slice i along this axis has at least one face pointing this direction
 	// A face is a solid block with air next to it, which for a whole row is just `row & ~neighbourRow`
 	uint32_t slicesWithFaces(int axis, int direction) const {
-		const int S = ChunkSection::size;
+		const int S = size;
 		uint32_t slices = 0;
 		if (axis == 0) {
 			// Neighbour along x is in the same row, one bit over
@@ -292,12 +357,18 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 	}
 }
 
-MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
+MeshData Chunk::buildMesh(const ChunkMeshInput& fullInput, int lod) {
 	MeshData mesh;
+	// Far away: mesh a shrunk copy where each cell is several blocks, then scale the quads back up to block units
+	// Everything below works the same on either, it just sees a smaller grid
+	ChunkMeshInput shrunk;
+	if (lod > 0) shrunk = downsample(fullInput, lod);
+	const ChunkMeshInput& input = lod > 0 ? shrunk : fullInput;
+	const int scale = lodScale(lod);
 	SolidRows solid(input);
 
-	// Area to mesh: one section
-	const int size[3] = { ChunkSection::size, ChunkSection::size, ChunkSection::size };
+	// Area to mesh: one section (fewer, bigger cells for LOD)
+	const int size[3] = { input.size, input.size, input.size };
 	std::vector<uint32_t> mask;
 
 	for (int axis = 0; axis < 3; axis++) {
@@ -374,7 +445,7 @@ MeshData Chunk::buildMesh(const ChunkMeshInput& input) {
 						origin[axis] = slice + (direction > 0 ? 1 : 0);
 						origin[u] = a;
 						origin[v] = b;
-						addQuad(mesh, origin, uStep * width, vStep * height, direction, face, cell);
+						addQuad(mesh, origin * scale, uStep * (width * scale), vStep * (height * scale), direction, face, cell);
 
 						// Claim the cells so they aren't used again
 						for (int h = 0; h < height; h++) {

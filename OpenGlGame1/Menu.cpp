@@ -244,6 +244,34 @@ MenuAction Menu::drawSettings(UI& ui, Settings& settings) {
 		Settings::minRenderDistance, Settings::maxRenderDistance)) {
 		action.type = MenuAction::Type::SettingsChanged;
 	}
+	y += l.buttonH + l.gap * 3;
+
+	// Level of detail, each slider is where that level starts as a percentage of render distance
+	// Dragging one past another pushes it along, so they always stay 2x -> 4x -> 8x going outwards
+	ui.label("LEVEL OF DETAIL (FAR TERRAIN IN BIGGER BLOCKS)", l.left(), y, ui.scale(), grey);
+	y += UIRenderer::textHeight(ui.scale()) + l.gap * 2;
+	auto lodText = [&](const std::string& name, int percent) {
+		if (percent >= 100) return name + " BLOCKS: OFF";
+		int chunks = static_cast<int>(percent * 0.01f * settings.renderDistance + 0.5f);
+		return name + " BLOCKS FROM " + std::to_string(percent) + "% (" + std::to_string(chunks) + " CHUNKS)";
+	};
+	if (ui.slider(lodText("2X", settings.lod2xPercent), l.left(), y, l.buttonW, l.buttonH, settings.lod2xPercent, 1, 100)) {
+		settings.lod4xPercent = std::max(settings.lod4xPercent, settings.lod2xPercent);
+		settings.lod8xPercent = std::max(settings.lod8xPercent, settings.lod4xPercent);
+		action.type = MenuAction::Type::SettingsChanged;
+	}
+	y += l.buttonH + l.gap;
+	if (ui.slider(lodText("4X", settings.lod4xPercent), l.left(), y, l.buttonW, l.buttonH, settings.lod4xPercent, 1, 100)) {
+		settings.lod2xPercent = std::min(settings.lod2xPercent, settings.lod4xPercent);
+		settings.lod8xPercent = std::max(settings.lod8xPercent, settings.lod4xPercent);
+		action.type = MenuAction::Type::SettingsChanged;
+	}
+	y += l.buttonH + l.gap;
+	if (ui.slider(lodText("8X", settings.lod8xPercent), l.left(), y, l.buttonW, l.buttonH, settings.lod8xPercent, 1, 100)) {
+		settings.lod4xPercent = std::min(settings.lod4xPercent, settings.lod8xPercent);
+		settings.lod2xPercent = std::min(settings.lod2xPercent, settings.lod4xPercent);
+		action.type = MenuAction::Type::SettingsChanged;
+	}
 	y += l.buttonH + l.gap * 6;
 
 	if (ui.button("BACK", l.left(), y, l.buttonW, l.buttonH)) open(settingsReturnTo);

@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #define STB_IMAGE_IMPLEMENTATION  // This tells stb to include the implementation
@@ -193,13 +194,21 @@ void Renderer::createHighlight() {
 
 // ---------- per frame ----------
 
+glm::mat4 Renderer::projection(float zoom, float aspect, float farPlane) {
+    // Zooming is just a narrower field of view: half the view's height is tan(fov / 2) at distance 1,
+    // so to make things zoom times bigger that has to be zoom times smaller
+    const float baseFov = glm::radians(90.0f);
+    float fov = 2.0f * std::atan(std::tan(baseFov * 0.5f) / zoom);
+    return glm::perspective(fov, aspect, 0.1f, farPlane);
+}
+
 void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm::mat4& view,
-    int width, int height, float time, float farPlane, const RaycastHit* highlight) {
+    int width, int height, float time, float farPlane, float zoom, const RaycastHit* highlight) {
 
 
     stats = RenderStats();
 
-    glm::mat4 projection = glm::perspective(glm::radians(90.0f), (float)width / (float)height, 0.1f, farPlane);
+    glm::mat4 projection = Renderer::projection(zoom, (float)width / (float)height, farPlane);
 
     //whats in current view
     glm::mat4 viewProj = projection * view;
@@ -370,6 +379,7 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
                 visibleSections.push_back({ &mesh, origin });
                 if (countStats) {
                     stats.sectionsDrawn++;
+                    stats.sectionsByLod[chunk->sections[s].meshLod]++;
                     stats.triangles += mesh.indexCount() / 3;
                 }
             }

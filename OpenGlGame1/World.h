@@ -15,6 +15,7 @@
 #include "DebugStats.h"
 #include "ChunkMeshPool.h"
 #include "ThreadPool.h"
+#include "Frustum.h"
 
 // Result of World::raycast
 struct RaycastHit {
@@ -27,6 +28,14 @@ struct ChunkRegion {
 	static constexpr int regionSize = 8;
 	glm::ivec2 coords;//in regions
 	std::vector<const Chunk*> chunks;//loaded chunks inside it, pointers stay valid because unordered_map never moves its elements
+};
+
+// What World needs from the camera to pick each column's level of detail
+// Zooming makes far things look close, so inside the zoomed view they get the detail of something zoom times nearer
+struct LodView {
+	float zoom = 1.0f;//1 = not zoomed
+	glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);//camera direction, only looked at while zoomed
+	Frustum zoomedView;//what the zoomed camera sees, only set while zoomed
 };
 
 // Owns every chunk: loading, unloading, generation and meshing jobs, and block access in world coordinates
@@ -43,7 +52,7 @@ public:
 	World& operator=(const World&) = delete;
 
 	// Call once per frame: starts/finishes chunk generation and meshing around the player, unloads far chunks
-	void update(const glm::vec3& playerPosition);
+	void update(const glm::vec3& playerPosition, const LodView& view = LodView());
 
 	BlockType getBlock(const glm::ivec3& worldPos) const;//AIR if the chunk isn't loaded
 	void setBlock(const glm::ivec3& worldPos, BlockType type);
@@ -59,6 +68,12 @@ public:
 
 	void setRenderDistance(int chunks);//can change while playing, chunks load/unload to match
 	int getRenderDistance() const { return renderDistance; }
+
+	// Where each LOD level starts, as a percentage of render distance: 2x blocks, 4x blocks, 8x blocks
+	// 100 means that level is never used
+	void setLodDistances(int percent2x, int percent4x, int percent8x);
+	int getLodPercent(int level) const { return lodPercent[level]; }//0 = where 2x starts, 1 = 4x, 2 = 8x
+	static constexpr float minFullDetailChunks = 4.0f;//never less than this around the player, whatever the settings say
 
 	// True once the chunk under this world position is loaded, so physics doesn't drop the player through it
 	bool isLoadedAt(const glm::vec3& worldPos) const;
@@ -114,6 +129,7 @@ private:
 	struct MeshJob {
 		std::future<MeshData> future;
 		double editTime = -1.0;
+		uint8_t lod = 0;//what it's being built at, the column may have moved on by the time it finishes
 	};
 
 	// Workers for generation and meshing, made once per world instead of a thread per job
@@ -155,5 +171,22 @@ private:
 	std::vector<SectionKey> parkedMeshes;//queued but outside render distance, back in the heap when the player moves
 	glm::vec3 lastPlayerPosition = glm::vec3(0.0f);
 	void pushMesh(const SectionKey& key, const Chunk& chunk);
+
+	// level of detail
+	int lodPercent[3] = { 15, 30, 60 };//see setLodDistances
+	LodView lodView;//from the last update
+	bool lodsChanged = true;//settings or render distance changed, every column needs checking
+	glm::vec3 lastLodForward = glm::vec3(0.0f);//camera direction when the zoomed view was last checked
+	std::vector<uint64_t> zoomUpgraded;//columns given more detail while zoomed, the only ones to check when zoom ends
+	float lodStart(int level) const;//distance in chunks where a level starts, infinity if it's switched off
+	int lodForDistance(float chunks) const;//level for something this many chunks away, ignoring zoom
+	int targetLod(uint64_t key, const Chunk& chunk) const;//level the column should be at right now
+	// Each of these re-picks levels for some columns and queues a remesh for the ones that changed (checkLod)
+	// Looking at all 160k columns at render distance 200 takes ~20 ms, so only the full one does that
+	void checkLod(uint64_t key, Chunk& chunk);
+	void updateAllLods();//settings changed
+	void updateLodRings(float moved);//player moved this many chunks: only columns near a level boundary can change
+	void updateZoomedLods();//columns inside the zoomed view
+	void endZoomLods();//zoom ended: zoomUpgraded go back to normal
 	void refreshMeshHeap();//new distances after the player moved, and gives parked sections another chance
 };

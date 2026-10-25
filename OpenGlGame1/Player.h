@@ -45,6 +45,16 @@ public:
 	float getPitch() const { return pitch; }
 	void setLook(float newYaw, float newPitch);
 
+	// Zoom (C toggles, scroll wheel changes how far while zoomed)
+	static constexpr float defaultZoom = 4.0f;
+	static constexpr float minZoom = 2.0f;
+	static constexpr float maxZoom = 16.0f;
+	void toggleZoom();
+	void scrollZoom(float notches);//positive = further in, ignored when not zoomed
+	void updateZoom(float deltaTime);//eases the shown zoom towards where it's heading, once per frame
+	float getZoom() const { return zoom; }//what to draw with right now, mid ease
+	float getTargetZoom() const { return zoomed ? targetZoom : 1.0f; }//where it's heading, 1 when not zoomed
+
 private:
 	void playerMovement(float deltaTime, const World& world);
 	void updateCameraFront();//from yaw and pitch
@@ -62,6 +72,10 @@ private:
 	float pitch = 0.0f;
 
 	const float lookSens = 0.1f;
+
+	bool zoomed = false;
+	float targetZoom = defaultZoom;
+	float zoom = 1.0f;
 
 	//mouse movement
 	float lastX = 400, lastY = 300;

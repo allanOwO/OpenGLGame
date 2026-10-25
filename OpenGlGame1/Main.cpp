@@ -95,6 +95,10 @@ void Main::keyCallback(GLFWwindow* window, int key, int scancode, int action, in
     if (key == GLFW_KEY_F3 && action == GLFW_PRESS) {
         main->debugOverlay.toggle();
     }
+    // Only while actually playing, so typing a C into a world name doesn't zoom
+    if (key == GLFW_KEY_C && action == GLFW_PRESS && main->player && main->cursorCaptured && !main->benchmark) {
+        main->player->toggleZoom();
+    }
 }
 
 void Main::scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
@@ -240,6 +244,7 @@ void Main::startWorld(const WorldInfo& info) {
     std::cout << "Opening world '" << info.name << "', seed " << info.seed << std::endl;
 
     world = std::make_unique<World>(info.seed, settings.renderDistance);
+    world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
     // Edited chunks come from the save, everything else regenerates from the seed (missing file = new world)
     world->loadChunks(WorldSave::chunksPath(info.name));
 
@@ -292,6 +297,7 @@ void Main::startBenchmark() {
 
     // A fresh world every run, nothing is loaded from or saved to disk so runs can't affect each other
     world = std::make_unique<World>(Benchmark::seed, settings.renderDistance);
+    world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
     player = std::make_unique<Player>(window);//not moved, but the rest of Main expects one alongside a world
     benchmark = std::make_unique<Benchmark>(*world, width, height);
 
@@ -371,7 +377,10 @@ void Main::handleMenuAction(const MenuAction& action) {
         break;
 
     case Type::SettingsChanged:
-        if (world) world->setRenderDistance(settings.renderDistance);
+        if (world) {
+            world->setRenderDistance(settings.renderDistance);
+            world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
+        }
         settingsDirty = true;
         break;
 
@@ -501,12 +510,17 @@ void Main::run() {
         double updateStart = nowSeconds();
         if (playing) {
             updateGame(deltaTime);
+            player->scrollZoom(input.scroll);//the wheel only does something in menus otherwise
         }
+        if (player) player->updateZoom(deltaTime);
 
         // The benchmark flies its own camera, otherwise it's the player's
         glm::vec3 cameraPos(0.0f);
         glm::mat4 view(1.0f);
         float sunTime = currentFrame;
+        float zoom = 1.0f;
+        float farPlane = world ? (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f : 1.0f;
+        LodView lodView;//the benchmark never zooms, so its runs stay comparable
         if (benchmark) {
             benchmark->update(*world, frameSeconds);//uncapped, so the path takes the same real time on any machine
             cameraPos = benchmark->cameraPos();
@@ -516,20 +530,27 @@ void Main::run() {
         else if (world) {
             cameraPos = player->getCameraPos();
             view = player->getViewMatrix();
+            zoom = player->getZoom();
+            // World is told where the zoom is heading rather than the eased value,
+            // so the levels are only picked once per zoom change instead of every frame of the ease
+            lodView.zoom = player->getTargetZoom();
+            lodView.forward = player->getCameraFront();
+            if (lodView.zoom > 1.0f) {
+                lodView.zoomedView.update(Renderer::projection(lodView.zoom, (float)width / (float)height, farPlane) * view);
+            }
         }
 
         if (world) {
             // Keeps loading chunks while paused, so the world is ready when you resume
-            world->update(cameraPos);
+            world->update(cameraPos, lodView);
         }
         lastFrameTimes.updateMs = static_cast<float>((nowSeconds() - updateStart) * 1000.0);
 
         // 3D world, or a plain background on the title screens
         double renderStart = nowSeconds();
         if (world) {
-            float farPlane = (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f;
             renderer->render(*world, cameraPos, view,
-                width, height, sunTime, farPlane, playing && hasTarget ? &target : nullptr);
+                width, height, sunTime, farPlane, zoom, playing && hasTarget ? &target : nullptr);
         }
         else {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
