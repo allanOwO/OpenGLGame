@@ -358,9 +358,13 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
             if (countStats) stats.mergedRegionsDrawn++;
         }
 
+        // Fully merged (most regions past simulation distance): nothing else to draw, skip its 64 columns
+        if (!entry.region->mayHaveLoose) continue;
+        bool anyLoose = false;
         for (const Chunk* chunk : entry.region->chunks) {
             uint32_t meshed = chunk->meshedSections & ~chunk->mergedSections;//merged ones were just drawn above
             if (!chunk->isActive || meshed == 0) continue;
+            anyLoose = true;
 
             // Whole column next, from its lowest to highest drawn section, same idea as the regions
             bool testSections = false;
@@ -396,6 +400,20 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
                 }
             }
         }
+        if (!anyLoose) entry.region->mayHaveLoose = false;//checked, next frame can skip it
+    }
+
+    // Far terrain after the near chunks, which are nearer and so better for filling the depth buffer first
+    if (!countStats) return;
+    const float unitWidth = static_cast<float>(FarUnit::unitBlocks);
+    for (const auto& pair : world.getFarUnits()) {
+        const FarUnit& unit = pair.second;
+        if (unit.mesh.vertexCount == 0) continue;
+        glm::vec3 min = unit.origin();
+        if (!view.isBoxInFrustum(min, min + glm::vec3(unitWidth, top - bottom, unitWidth))) continue;
+        glm::vec2 corner(min.x, min.z);
+        visibleSections.push_back({ &unit.mesh, min, corner, corner + glm::vec2(unitWidth) });
+        stats.farUnitsDrawn++;
     }
 }
 

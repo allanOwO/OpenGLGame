@@ -163,6 +163,7 @@
     <ClCompile Include="DebugOverlay.cpp" />
     <ClCompile Include="Benchmark.cpp" />
     <ClCompile Include="ChunkMeshPool.cpp" />
+    <ClCompile Include="FarTerrain.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockConstants.h" />
@@ -192,6 +193,7 @@
     <ClInclude Include="ThreadPool.h" />
     <ClInclude Include="Screenshot.h" />
     <ClInclude Include="ChunkMeshPool.h" />
+    <ClInclude Include="FarTerrain.h" />
     <ClInclude Include="GLFunctions.h" />
     <ClInclude Include="DebugOverlay.h" />
     <ClInclude Include="Benchmark.h" />

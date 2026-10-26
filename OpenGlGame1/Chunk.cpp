@@ -9,40 +9,25 @@
 
 
 Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain) : chunkPosition(position) {
-	// Filled as one column first (simplest to fill), then split into sections and compressed
-	std::vector<BlockType> flat(static_cast<size_t>(chunkSize) * chunkHeight * chunkSize, BlockType::AIR);
-
-	for (int x = 0; x < chunkSize; x++) {
-		for (int z = 0; z < chunkSize; z++) {
-
-			float worldX = chunkPosition.x + x;
-			float worldZ = chunkPosition.z + z;
-
-			float height = terrain.getHeight(worldX, worldZ);
-
-			int terrainHeight = static_cast<int>(height);
-			for (int y = 0; y < chunkHeight; y++) {
-				BlockType type;
-
-				//dont add block type for air as its air by default
-				if (y > terrainHeight) {
-					break;
-				}
-				if (y == terrainHeight) {
-					type = BlockType::GRASS;
-				}
-				else if (y >= terrainHeight - 3) {
-					type = BlockType::DIRT;
-				}
-				else {
-					type = BlockType::STONE;
-				}
-
-				flat[flatIndex(x, y, z)] = type;
-			}
+	// Just the heights: the blocks follow from them (terrainBlock), so they're never written out
+	int lowest = chunkHeight, highest = -1;
+	for (int z = 0; z < chunkSize; z++) {
+		for (int x = 0; x < chunkSize; x++) {
+			int height = static_cast<int>(terrain.getHeight(chunkPosition.x + x, chunkPosition.z + z));
+			heights[z * chunkSize + x] = static_cast<int16_t>(height);
+			lowest = std::min(lowest, height);
+			highest = std::max(highest, height);
 		}
 	}
-	buildSections(flat);
+
+	// Sections entirely above the surface are air, entirely below the dirt are stone, the rest are terrain
+	for (int s = 0; s < sectionCount; s++) {
+		ChunkSection& section = sections[s];
+		int bottom = s * ChunkSection::size, top = bottom + ChunkSection::size - 1;
+		if (bottom > highest) section.fill = BlockType::AIR;
+		else if (top < lowest - 3) section.fill = BlockType::STONE;
+		else section.terrain = true;
+	}
 }
 
 Chunk::Chunk(glm::ivec3 position, const std::vector<BlockType>& savedBlocks)
@@ -66,7 +51,12 @@ std::vector<BlockType> Chunk::flatBlocks() const {
 	for (int s = 0; s < sectionCount; s++) {
 		const ChunkSection& section = sections[s];
 		BlockType* out = &flat[flatIndex(0, s * ChunkSection::size, 0)];
-		if (section.isUniform()) std::fill(out, out + ChunkSection::volume, section.fill);
+		if (section.terrain) {
+			for (int y = 0; y < ChunkSection::size; y++)
+				for (int i = 0; i < chunkSize * chunkSize; i++)
+					out[y * chunkSize * chunkSize + i] = terrainBlock(heights[i], s * ChunkSection::size + y);
+		}
+		else if (section.isUniform()) std::fill(out, out + ChunkSection::volume, section.fill);
 		else std::copy(section.blocks.begin(), section.blocks.end(), out);
 	}
 	return flat;
@@ -75,9 +65,13 @@ std::vector<BlockType> Chunk::flatBlocks() const {
 // ---------- sections ----------
 
 bool ChunkSection::set(int x, int y, int z, BlockType type) {
-	if (get(x, y, z) == type) return false;
-	if (blocks.empty()) blocks.assign(volume, fill);//first different block, now it needs the full array
-	blocks[index(x, y, z)] = type;
+	if (blocks.empty()) {
+		if (fill == type) return false;
+		blocks.assign(volume, fill);//first different block, now it needs the full array
+	}
+	BlockType& block = blocks[index(x, y, z)];
+	if (block == type) return false;
+	block = type;
 	return true;
 }
 
@@ -93,6 +87,74 @@ void ChunkSection::compress() {
 }
 
 // ---------- meshing input ----------
+
+// Which column a padded x/z coordinate (-1 to 16) falls in, -1/0/+1 on each axis
+static const Chunk* columnAt(const Chunk* self, const Chunk* const neighbours[8], int dx, int dz) {
+	if (dx == 0 && dz == 0) return self;
+	if (dz == 0) return dx > 0 ? neighbours[0] : neighbours[1];
+	if (dx == 0) return dz > 0 ? neighbours[2] : neighbours[3];
+	if (dx > 0) return dz > 0 ? neighbours[4] : neighbours[5];
+	return dz > 0 ? neighbours[6] : neighbours[7];
+}
+
+bool Chunk::makeTerrainSource(int sectionIndex, const Chunk* const neighbours[8], TerrainMeshSource& source) const {
+	source.section = sectionIndex;
+	for (int dz = -1; dz <= 1; dz++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			int c = (dz + 1) * 3 + (dx + 1);
+			const Chunk* column = columnAt(this, neighbours, dx, dz);
+			source.loaded[c] = column != nullptr;
+			if (!column) continue;
+			bool anyTerrain = false;
+			for (int r = 0; r < 3; r++) {
+				int s = sectionIndex - 1 + r;
+				if (s < 0 || s >= sectionCount) continue;//below/above the world, expand handles those
+				const ChunkSection& section = column->sections[s];
+				if (!section.blocks.empty()) return false;//edited, needs the real blocks
+				source.terrain[c][r] = section.terrain;
+				source.fill[c][r] = section.fill;
+				anyTerrain |= section.terrain;
+			}
+			if (anyTerrain) source.heights[c] = column->heights;
+		}
+	}
+	return true;
+}
+
+ChunkMeshInput Chunk::expand(const TerrainMeshSource& source) {
+	// Same layout and rules as makeMeshInput, just reading the copied heights instead of the chunks
+	constexpr int P = ChunkMeshInput::paddedSize;
+	constexpr int S = ChunkSection::size;
+	ChunkMeshInput input;
+	input.blocks.resize(static_cast<size_t>(P) * P * P);
+	for (int py = -1; py <= S; py++) {
+		int y = source.section * S + py;
+		for (int pz = -1; pz <= S; pz++) {
+			BlockType* row = &input.blocks[(static_cast<size_t>(py + 1) * P + (pz + 1)) * P];
+			if (y < 0) { std::fill(row, row + P, BlockType::STONE); continue; }
+			if (y >= chunkHeight) { std::fill(row, row + P, BlockType::AIR); continue; }
+
+			int dz = pz < 0 ? -1 : (pz >= S ? 1 : 0);
+			int localZ = pz - dz * S;
+			int r = y / S - source.section + 1;
+			for (int dx = -1; dx <= 1; dx++) {
+				int c = (dz + 1) * 3 + (dx + 1);
+				int first = dx < 0 ? -1 : (dx == 0 ? 0 : S);
+				int count = dx == 0 ? S : 1;
+				BlockType* out = row + (first + 1);
+				if (!source.loaded[c]) { std::fill(out, out + count, BlockType::AIR); continue; }
+				if (source.terrain[c][r]) {
+					const int16_t* heightRow = &source.heights[c][localZ * chunkSize + (first - dx * S)];
+					for (int i = 0; i < count; i++) out[i] = terrainBlock(heightRow[i], y);
+				}
+				else {
+					std::fill(out, out + count, source.fill[c][r]);
+				}
+			}
+		}
+	}
+	return input;
+}
 
 ChunkMeshInput Chunk::makeMeshInput(int sectionIndex, const Chunk* const neighbours[8]) const {
 	constexpr int P = ChunkMeshInput::paddedSize;
@@ -130,7 +192,11 @@ ChunkMeshInput Chunk::makeMeshInput(int sectionIndex, const Chunk* const neighbo
 
 				const ChunkSection& section = column->sections[y / S];
 				int localX = first - dx * S;
-				if (section.isUniform()) {
+				if (section.terrain) {
+					const int16_t* heightRow = &column->heights[localZ * chunkSize + localX];
+					for (int i = 0; i < count; i++) out[i] = terrainBlock(heightRow[i], y);
+				}
+				else if (section.isUniform()) {
 					std::fill(out, out + count, section.fill);
 				}
 				else {
@@ -357,6 +423,13 @@ static void addQuad(MeshData& mesh, const glm::ivec3& origin, const glm::ivec3& 
 	}
 }
 
+void Chunk::appendQuad(MeshData (&groups)[faceGroupCount], const glm::ivec3& origin, const glm::ivec3& du, const glm::ivec3& dv,
+	int axis, int direction, BlockType type) {
+	int face = faceIndex(axis, direction);
+	uint32_t tile = static_cast<uint32_t>(getBlockTile(type, static_cast<BlockFace>(face)));
+	addQuad(groups[faceGroupOf(face)], origin, du, dv, direction, face, makeCell(tile, 3, 3, 3, 3));
+}
+
 MeshData Chunk::buildMesh(const ChunkMeshInput& fullInput, int lod) {
 	// Quads go into one list per face group, joined at the end (see FaceGroup)
 	MeshData groups[faceGroupCount];
@@ -473,6 +546,16 @@ bool Chunk::setBlock(int x, int y, int z, BlockType type) {
 	if (x < 0 || x >= chunkSize || y < 0 || y >= chunkHeight || z < 0 || z >= chunkSize) return false;//if outside chunk
 
 	ChunkSection& section = sections[y / ChunkSection::size];
+	if (section.terrain) {
+		// First edit in it: it can't be worked out from the heights any more, so it gets a real array
+		if (getBlock(x, y, z) == type) return false;
+		int bottom = (y / ChunkSection::size) * ChunkSection::size;
+		section.blocks.resize(ChunkSection::volume);
+		for (int ly = 0; ly < ChunkSection::size; ly++)
+			for (int i = 0; i < chunkSize * chunkSize; i++)
+				section.blocks[ly * chunkSize * chunkSize + i] = terrainBlock(heights[i], bottom + ly);
+		section.terrain = false;
+	}
 	if (!section.set(x, y % ChunkSection::size, z, type)) return false;
 	section.rebuildNeeded = true;
 	modified = true;
@@ -480,5 +563,8 @@ bool Chunk::setBlock(int x, int y, int z, BlockType type) {
 }
 
 BlockType Chunk::getBlock(int x, int y, int z) const {
-	return sections[y / ChunkSection::size].get(x, y % ChunkSection::size, z);
+	const ChunkSection& section = sections[y / ChunkSection::size];
+	if (section.terrain) return terrainBlock(heights[z * chunkSize + x], y);
+	if (section.blocks.empty()) return section.fill;
+	return section.blocks[ChunkSection::index(x, y % ChunkSection::size, z)];
 }

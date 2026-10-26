@@ -11,6 +11,11 @@
 
 #include "World.h"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX//windows.h would otherwise turn min and max into macros
+#include <windows.h>
+#include <psapi.h>
+
 namespace {
 	// Changing any of these changes the test, so old results stop being comparable
 	const double loadTimeout = 180.0;//give up waiting for the world after this long
@@ -45,6 +50,16 @@ namespace {
 		return values[index];
 	}
 
+	// RAM the whole game uses, and the most it has used at once
+	void processMemory(size_t& now, size_t& peak) {
+		PROCESS_MEMORY_COUNTERS counters{};
+		now = peak = 0;
+		if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
+			now = counters.WorkingSetSize;
+			peak = counters.PeakWorkingSetSize;
+		}
+	}
+
 	std::string timestamp(const char* format) {
 		std::time_t now = std::time(nullptr);
 		std::tm local{};
@@ -56,8 +71,8 @@ namespace {
 }
 
 Benchmark::Benchmark(const World& world, int screenWidth, int screenHeight)
-	: renderDistance(world.getRenderDistance()),
-	lodText("LOD " + std::to_string(world.getLodPercent(0)) + "/" + std::to_string(world.getLodPercent(1)) + "/" + std::to_string(world.getLodPercent(2)) + "%  SIMULATION " + std::to_string(world.getSimulationDistance())),
+	: renderDistance(world.getFarDistance()),
+	lodText("DETAIL " + std::to_string(world.getRenderDistance()) + "  LOD " + std::to_string(world.getLodPercent(0)) + "/" + std::to_string(world.getLodPercent(1)) + "/" + std::to_string(world.getLodPercent(2)) + "%  SIMULATION " + std::to_string(world.getSimulationDistance())),
 	screenWidth(screenWidth), screenHeight(screenHeight),
 	runName("benchmark_" + timestamp("%Y-%m-%d_%H-%M-%S")) {
 
@@ -202,6 +217,7 @@ void Benchmark::update(World& world, double deltaSeconds) {
 		doEdits(world);
 		if (phaseTime >= editSeconds) {
 			finalStats = world.getStats();//before zooming adds detail, so memory matches older runs
+			processMemory(processBytes, peakProcessBytes);
 			startPhase(Phase::Zoom, world);
 		}
 		break;
@@ -334,7 +350,8 @@ std::vector<std::string> Benchmark::finish() {
 		frameLine("FLIGHT  ", flight, flightFrames) + "  " + fixed(streamedPerSecond, 0) + " CHUNKS/S",
 		"EDITS   " + std::to_string(editsShown) + " EDITS  EDIT TO SCREEN " + fixed(editLatencyMs, 1) + " MS  MESH " + fixed(editMeshMs, 2) + " MS",
 		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAWS",
-		"MEMORY  BLOCKS " + megabytes(finalStats.blockBytes) + " MB  MESHES " + megabytes(finalStats.meshBytes) + " MB",
+		"MEMORY  BLOCKS " + megabytes(finalStats.blockBytes) + " MB  MESHES " + megabytes(finalStats.meshBytes) + " MB  WHOLE GAME "
+			+ megabytes(processBytes) + " MB (PEAK " + megabytes(peakProcessBytes) + " MB)",
 	};
 
 	// ---- files ----
@@ -375,7 +392,7 @@ std::vector<std::string> Benchmark::finish() {
 		}
 
 		// Inside World::update, same percentile for each part on its own
-		report << "\nslowest 1% of world update parts (99th percentile, ms)\nphase        area    apply     load   upload   launch    merge      lod\n";
+		report << "\nslowest 1% of world update parts (99th percentile, ms)\nphase        area    apply     load   upload   launch    merge      lod      far\n";
 		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			auto part = [&r](float UpdateTimes::* member) {
@@ -385,15 +402,31 @@ std::vector<std::string> Benchmark::finish() {
 				return percentile99(values);
 			};
 			char row[128];
-			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], part(&UpdateTimes::areaMs),
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], part(&UpdateTimes::areaMs),
 				part(&UpdateTimes::applyMs), part(&UpdateTimes::loadMs), part(&UpdateTimes::uploadMs), part(&UpdateTimes::launchMs),
-				part(&UpdateTimes::mergeMs), part(&UpdateTimes::lodMs));
+				part(&UpdateTimes::mergeMs), part(&UpdateTimes::lodMs), part(&UpdateTimes::farMs));
+			report << row;
+		}
+
+		// Average of each part, shows what a phase spends most of its time on (where the worst tables show spikes)
+		report << "\naverage world update parts (ms)\nphase        area    apply     load   upload   launch    merge      lod      far\n";
+		for (int i = 0; i < phaseCount; i++) {
+			const PhaseRecord& r = *phases[i];
+			auto average = [&r](float UpdateTimes::* member) {
+				double total = 0.0;
+				for (const UpdateTimes& t : r.updateParts) total += t.*member;
+				return r.updateParts.empty() ? 0.0 : total / r.updateParts.size();
+			};
+			char row[128];
+			std::snprintf(row, sizeof(row), "%-8s %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f\n", names[i], average(&UpdateTimes::areaMs),
+				average(&UpdateTimes::applyMs), average(&UpdateTimes::loadMs), average(&UpdateTimes::uploadMs), average(&UpdateTimes::launchMs),
+				average(&UpdateTimes::mergeMs), average(&UpdateTimes::lodMs), average(&UpdateTimes::farMs));
 			report << row;
 		}
 
 		// The single worst frame of each part: things that happen once in a while (crossing into another chunk,
 		// a zoom) are under 1% of frames, so the table above can't show them
-		report << "\nworst single frame of each world update part (ms)\nphase        area    apply     load   upload   launch    merge      lod\n";
+		report << "\nworst single frame of each world update part (ms)\nphase        area    apply     load   upload   launch    merge      lod      far\n";
 		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			auto worst = [&r](float UpdateTimes::* member) {
@@ -402,9 +435,9 @@ std::vector<std::string> Benchmark::finish() {
 				return highest;
 			};
 			char row[128];
-			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], worst(&UpdateTimes::areaMs),
+			std::snprintf(row, sizeof(row), "%-8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n", names[i], worst(&UpdateTimes::areaMs),
 				worst(&UpdateTimes::applyMs), worst(&UpdateTimes::loadMs), worst(&UpdateTimes::uploadMs), worst(&UpdateTimes::launchMs),
-				worst(&UpdateTimes::mergeMs), worst(&UpdateTimes::lodMs));
+				worst(&UpdateTimes::mergeMs), worst(&UpdateTimes::lodMs), worst(&UpdateTimes::farMs));
 			report << row;
 		}
 	}

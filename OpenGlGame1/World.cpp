@@ -22,11 +22,11 @@ static const double initialMeshingBudgetSeconds = 0.004;
 // A mesh takes ~0.01 ms, so with only one each the workers finished in microseconds and sat idle until next frame:
 // meshing was capped at (workers x frame rate) jobs a second, which flying at render distance 200 needs several times over
 // (every chunk crossed loads a row of chunks and moves the LOD rings). The time budgets above still keep frames smooth
-static const size_t meshJobsPerWorker = 8;
+static const size_t meshJobsPerWorker = 32;
 
 // Same for generation: a chunk takes ~0.14 ms, so one each per frame left the workers waiting most of the time
 // (render distance 200 took 22 s to load ~1.5 s of generating). Finished ones are added on a time budget
-static const size_t generationJobsPerWorker = 4;
+static const size_t generationJobsPerWorker = 16;
 static const double applyBudgetSeconds = 0.001;
 static const double initialApplyBudgetSeconds = 0.004;
 
@@ -45,6 +45,12 @@ static int floorDiv(int a, int b) {
 
 World::World(int seed, int renderDistance) : terrain(seed), workers(workerCount()), renderDistance(renderDistance) {
     rebuildLoadOrder();
+    farTerrain = std::make_unique<FarTerrain>(terrain, workers, meshPool,
+        [this](int x, int z) { return chunkShown(x, z); },
+        [this](int x, int z) {
+            auto it = editedTops.find(getChunkKey(x, z));
+            return it != editedTops.end() ? static_cast<int>(it->second) : -1;
+        });
 }
 
 void World::setRenderDistance(int chunks) {
@@ -62,6 +68,7 @@ bool World::isLoadedAt(const glm::vec3& worldPos) const {
 bool World::isFullyLoaded() const {
     if (isInitialLoading || loadCursor < loadOrder.size()) return false;
     if (!chunkGenerationFutures.empty() || !chunkMeshFutures.empty() || !dirtyRegions.empty() || !lodQueue.empty()) return false;
+    if (!farTerrain->isSettled()) return false;
     // Parked sections are outside render distance, so they don't count
     return meshHeap.empty();
 }
@@ -74,11 +81,8 @@ WorldStats World::getStats() const {
     stats.generation = JobTotals::of(generationTimer);
     stats.meshing = JobTotals::of(meshTimer);
     stats.editLatency = JobTotals::of(editLatencyTimer);
-    for (const auto& pair : chunks) {
-        const Chunk& chunk = pair.second;
-        if (chunk.isActive) stats.chunksActive++;
-        for (const ChunkSection& section : chunk.sections) stats.blockBytes += section.memoryBytes();
-    }
+    stats.chunksActive = activeChunks;
+    stats.blockBytes = blockBytes;
     stats.meshBytes = meshPool.usedBytes();
     stats.dirtyRegions = static_cast<int>(dirtyRegions.size());
     return stats;
@@ -103,12 +107,29 @@ bool World::saveChunks(const std::string& path) {
 }
 
 bool World::loadChunks(const std::string& path) {
-    return storage.loadFromFile(path);
+    if (!storage.loadFromFile(path)) return false;
+    // Far terrain shows edited chunks by their highest block, worked out once here
+    storage.forEach([this](uint64_t key, const std::vector<uint8_t>& data) {
+        std::vector<BlockType> blocks;
+        if (decodeBlocks(data, static_cast<size_t>(Chunk::chunkSize) * Chunk::chunkHeight * Chunk::chunkSize, blocks)) {
+            editedTops[key] = static_cast<int16_t>(highestBlock(blocks));
+        }
+    });
+    return true;
+}
+
+int World::highestBlock(const std::vector<BlockType>& flat) {
+    // y is slowest in the flat layout, so from the end back to the first solid block
+    for (size_t i = flat.size(); i-- > 0;) {
+        if (flat[i] != BlockType::AIR) return static_cast<int>(i / (static_cast<size_t>(Chunk::chunkSize) * Chunk::chunkSize));
+    }
+    return -1;
 }
 
 World::~World() {
     // Jobs read terrain and add to the timers, so wait for every one before those are destroyed
     // (thread pool futures don't wait by themselves when destroyed)
+    farTerrain.reset();
     for (auto& pair : chunkGenerationFutures) pair.second.wait();
     for (auto& pair : chunkMeshFutures) pair.second.future.wait();
 }
@@ -187,6 +208,10 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
     start = nowSeconds();
     rebuildDirtyRegions();//after meshing, so this frame's uploads are included
     updateTimes.mergeMs = msSince(start);
+
+    start = nowSeconds();
+    farTerrain->update(lastPlayerChunk, renderDistance, getFarDistance(), isInitialLoading ? 0.004 : 0.001);
+    updateTimes.farMs = msSince(start);
 }
 
 // ---------- loading ----------
@@ -212,9 +237,6 @@ void World::rebuildLoadOrder() {
     // Room for everything in range plus the unload margin, so inserting chunks never has to rehash the whole map
     size_t side = static_cast<size_t>(2 * (renderDistance + unloadMargin) + 1);
     chunks.reserve(side * side);
-    // Same for the mesh queue: zooming can queue a few sections for every column at once,
-    // and rehashing 130k entries in the middle of a frame took 10+ ms
-    meshQueue.reserve(side * side * 4);
 }
 
 size_t World::cursorAfterMove(const glm::ivec3& move) const {
@@ -243,8 +265,13 @@ size_t World::cursorAfterMove(const glm::ivec3& move) const {
 void World::updateLoading(const glm::ivec3& playerChunkPos) {
     // Start as many generation jobs as there are free workers, nearest missing chunks first
     // (a fixed number per frame made loading speed depend on the frame rate instead of the CPU)
+    // Time budget too: after crossing a chunk the cursor goes back over thousands of already loaded chunks,
+    // which took 6 ms in one frame at render distance 400. The rest of the scan carries on next frame
     size_t running = chunkGenerationFutures.size();
+    double start = nowSeconds();
+    int scanned = 0;
     while (loadCursor < loadOrder.size() && running < workers.size() * generationJobsPerWorker) {
+        if ((++scanned & 255) == 0 && nowSeconds() - start > 0.0005) break;
         int chunkX = playerChunkPos.x + loadOrder[loadCursor].x;
         int chunkZ = playerChunkPos.z + loadOrder[loadCursor].y;
         uint64_t key = getChunkKey(chunkX, chunkZ);
@@ -268,9 +295,7 @@ bool World::isInRange(uint64_t key) const {
 
 void World::updateActiveChunks() {
     // Active = inside render distance, drawn and meshed. Inactive chunks wait in the unload margin
-    for (auto& pair : chunks) {
-        pair.second.isActive = isInRange(pair.first);
-    }
+    for (auto& pair : chunks) setActive(pair.first, pair.second, isInRange(pair.first));
 }
 
 void World::generateChunkAsync(int chunkX, int chunkZ) {
@@ -320,12 +345,16 @@ void World::tryApplyChunkGeneration(bool waitForAll) {
             }
             auto inserted = chunks.emplace(key, it->second.get());
             Chunk& chunk = inserted.first->second;
-            chunk.isActive = isInRange(key);//the player may have moved while it generated
+            editedTops.erase(key);//loaded again, it's the real blocks from here
+            chunk.isActive = false;
+            setActive(key, chunk, isInRange(key));//the player may have moved while it generated
+            blockBytes += chunk.memoryBytes();
             chunk.lod = static_cast<uint8_t>(targetLod(key, chunk));//meshed at the right detail straight away
             addToRegion(key, chunk);
-            requestColumnMesh(key);
+            if (neighboursReady(key)) requestColumnMesh(key);
 
-            // Neighbours meshed without this chunk have faces and ambient occlusion on the shared border, rebuild them
+            // Neighbours that were waiting for this chunk may be ready now, and any already meshed without it
+            // have faces and ambient occlusion on the shared border that need redoing
             markNeighboursForRebuild(chunkKeyX(key), chunkKeyZ(key));
 
             // Remove the completed future
@@ -342,9 +371,24 @@ void World::markNeighboursForRebuild(int chunkX, int chunkZ) {
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             if (dx == 0 && dz == 0) continue;
-            requestColumnMesh(getChunkKey(chunkX + dx, chunkZ + dz));
+            uint64_t key = getChunkKey(chunkX + dx, chunkZ + dz);
+            if (neighboursReady(key)) requestColumnMesh(key);//not ready: it's queued when its last neighbour arrives
         }
     }
+}
+
+bool World::neighboursReady(uint64_t key) const {
+    int chunkX = chunkKeyX(key), chunkZ = chunkKeyZ(key);
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dz == 0) continue;
+            int x = chunkX + dx, z = chunkZ + dz;
+            if (findChunk(x, z)) continue;
+            bool willLoad = std::abs(x - lastPlayerChunk.x) <= renderDistance && std::abs(z - lastPlayerChunk.z) <= renderDistance;
+            if (willLoad) return false;
+        }
+    }
+    return true;
 }
 
 void World::findNeighbours(uint64_t key, const Chunk* neighbours[8]) const {
@@ -370,11 +414,16 @@ bool World::isPastUnloadDistance(uint64_t key) const {
 std::unordered_map<uint64_t, Chunk>::iterator World::unloadChunk(std::unordered_map<uint64_t, Chunk>::iterator it) {
     // Unmodified chunks can be regenerated from the seed, only player edits need keeping
     if (it->second.modified) {
-        storage.store(it->first, encodeBlocks(it->second.flatBlocks()));
+        std::vector<BlockType> flat = it->second.flatBlocks();
+        editedTops[it->first] = static_cast<int16_t>(highestBlock(flat));
+        storage.store(it->first, encodeBlocks(flat));
     }
+    farTerrain->chunkChanged(chunkKeyX(it->first), chunkKeyZ(it->first));
     // Any mesh job still running for it only has a copy, its result is dropped when it finishes
     for (ChunkSection& section : it->second.sections) meshPool.release(section.mesh);
     removeFromRegion(it->first, it->second);
+    setActive(it->first, it->second, false);
+    blockBytes -= it->second.memoryBytes();
     return chunks.erase(it);
 }
 
@@ -405,10 +454,10 @@ static void forEachOnlyIn(const glm::ivec3& inside, const glm::ivec3& outside, i
 void World::updateEdges(const glm::ivec3& from, const glm::ivec3& to) {
     // Active = inside render distance. The strip behind the player stops being active, the one ahead starts
     forEachOnlyIn(from, to, renderDistance, [&](int x, int z) {
-        if (Chunk* chunk = findChunk(x, z)) chunk->isActive = false;
+        if (Chunk* chunk = findChunk(x, z)) setActive(getChunkKey(x, z), *chunk, false);
     });
     forEachOnlyIn(to, from, renderDistance, [&](int x, int z) {
-        if (Chunk* chunk = findChunk(x, z)) chunk->isActive = true;
+        if (Chunk* chunk = findChunk(x, z)) setActive(getChunkKey(x, z), *chunk, true);
     });
     // And the strip that's now past the unload margin is unloaded
     forEachOnlyIn(from, to, renderDistance + unloadMargin, [&](int x, int z) {
@@ -427,18 +476,27 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
 
     // Cleared before the job runs, so edits made while it runs queue another rebuild
     section.rebuildNeeded = false;
-    meshQueue.erase(key);
+    section.queued = false;
 
     // Open sky and solid rock: no faces, so no job, just make sure nothing old is still drawn
     if (chunk.sectionHasNoFaces(key.section, neighbours)) {
         meshPool.release(section.mesh);
         chunk.updateMeshedBit(key.section);
         sectionMeshChanged(key.column, chunk, key.section);
+        markRegionLoose(key.column);
         section.pendingEditTime = -1.0;
+        meshFinished(key.column, chunk);
         return false;
     }
 
-    ChunkMeshInput input = chunk.makeMeshInput(key.section, neighbours);
+    // Usually just the heights around it are copied and the worker builds the blocks (see TerrainMeshSource),
+    // next to an edit the blocks are copied here
+    auto source = std::make_shared<TerrainMeshSource>();//shared, the thread pool needs jobs it can copy
+    ChunkMeshInput input;
+    if (!chunk.makeTerrainSource(key.section, neighbours, *source)) {
+        source.reset();
+        input = chunk.makeMeshInput(key.section, neighbours);
+    }
     MeshJob& job = chunkMeshFutures[key];
     job.editTime = section.pendingEditTime;//this job's copy includes that edit
     job.lod = chunk.lod;
@@ -448,9 +506,9 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
     int chunkX = chunkKeyX(key.column), chunkZ = chunkKeyZ(key.column);
     uint16_t place = packPlace(chunkX - floorDiv(chunkX, ChunkRegion::regionSize) * ChunkRegion::regionSize,
         chunkZ - floorDiv(chunkZ, ChunkRegion::regionSize) * ChunkRegion::regionSize, key.section);
-    job.future = workers.submit([input = std::move(input), timer, lod, place]() {
+    job.future = workers.submit([input = std::move(input), source = std::move(source), timer, lod, place]() {
         double start = nowSeconds();
-        MeshData mesh = Chunk::buildMesh(input, lod);
+        MeshData mesh = source ? Chunk::buildMesh(Chunk::expand(*source), lod) : Chunk::buildMesh(input, lod);
         for (PackedVertex& vertex : mesh.vertices) vertex.place = place;
         timer->add(nowSeconds() - start);
         return mesh;
@@ -478,6 +536,8 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
             chunk->sections[it->first.section].meshLod = job.lod;
             chunk->updateMeshedBit(it->first.section);
             sectionMeshChanged(it->first.column, *chunk, it->first.section);
+            markRegionLoose(it->first.column);
+            meshFinished(it->first.column, *chunk);
             // The edit is on screen from the next frame
             if (job.editTime >= 0.0) editLatencyTimer.add(nowSeconds() - job.editTime);
         }// else the chunk was unloaded while meshing
@@ -507,7 +567,10 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
 
         Chunk* chunk = findChunk(chunkKeyX(next.key.column), chunkKeyZ(next.key.column));
         if (!chunk || !chunk->sections[next.key.section].rebuildNeeded) {
-            meshQueue.erase(next.key);//unloaded or already done since it was queued
+            if (chunk) {
+                chunk->sections[next.key.section].queued = false;//already done since it was queued
+                meshFinished(next.key.column, *chunk);
+            }
             continue;
         }
         if (chunkMeshFutures.find(next.key) != chunkMeshFutures.end()) {//one job per section at a time
@@ -515,7 +578,12 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
             continue;
         }
         if (!chunk->isActive) {
-            parkedMeshes.push_back(next.key);//still in meshQueue, meshed if the player comes back into range
+            parkedMeshes.push_back(next.key);//still queued, meshed if the player comes back into range
+            continue;
+        }
+        if (!neighboursReady(next.key.column)) {
+            chunk->sections[next.key.section].queued = false;//rebuildNeeded stays set, markNeighboursForRebuild queues it again later
+            meshFinished(next.key.column, *chunk);
             continue;
         }
         if (launchSectionMesh(next.key, *chunk)) launched++;
@@ -536,9 +604,13 @@ void World::refreshMeshHeap() {
         meshHeap.pop();
     }
     for (const SectionKey& key : keys) {
-        const Chunk* chunk = findChunk(chunkKeyX(key.column), chunkKeyZ(key.column));
-        if (chunk && chunk->sections[key.section].rebuildNeeded) pushMesh(key, *chunk);
-        else meshQueue.erase(key);//unloaded since it was queued
+        Chunk* chunk = findChunk(chunkKeyX(key.column), chunkKeyZ(key.column));
+        if (!chunk) continue;//unloaded since it was queued
+        if (chunk->sections[key.section].rebuildNeeded) pushMesh(key, *chunk);
+        else {
+            chunk->sections[key.section].queued = false;
+            meshFinished(key.column, *chunk);
+        }
     }
 }
 
@@ -551,6 +623,21 @@ void World::addToRegion(uint64_t key, Chunk& chunk) {
     ChunkRegion& region = regions[regionKey];
     region.coords = glm::ivec2(chunkKeyX(regionKey), chunkKeyZ(regionKey));
     region.chunks.push_back(&chunk);
+    region.mayHaveLoose = true;
+}
+
+void World::markRegionLoose(uint64_t chunkKey) {
+    auto it = regions.find(regionKeyFor(chunkKey));
+    if (it != regions.end()) it->second.mayHaveLoose = true;
+}
+
+void World::setActive(uint64_t key, Chunk& chunk, bool active) {
+    if (chunk.isActive == active) return;
+    chunk.isActive = active;
+    activeChunks += active ? 1 : -1;
+    if (active) markRegionLoose(key);//its sections may need drawing on their own again
+    if (chunk.mergedSections != 0 || mergesColumn(key)) markRegionDirty(key);//merged meshes only hold active chunks
+    farTerrain->chunkChanged(chunkKeyX(key), chunkKeyZ(key));
 }
 
 void World::removeFromRegion(uint64_t key, Chunk& chunk) {
@@ -652,7 +739,7 @@ void World::rebuildRegion(ChunkRegion& region) {
     for (Chunk* chunk : region.chunks) {
         int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;
         int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
-        chunk->mergeWanted = mergesColumn(getChunkKey(chunkX, chunkZ));
+        chunk->mergeWanted = mergesColumn(getChunkKey(chunkX, chunkZ)) && chunk->isActive;
         for (int s = 0; s < Chunk::sectionCount; s++) {
             ChunkSection& section = chunk->sections[s];
             bool hasSlice = (chunk->mergedSections & (1u << s)) && section.mergedCount > 0;
@@ -719,6 +806,7 @@ void World::rebuildRegion(ChunkRegion& region) {
             chunk->updateMeshedBit(s);
         }
     }
+    region.mayHaveLoose = true;//columns that left the merge are drawn on their own now, the renderer rechecks
 }
 
 void World::rebuildDirtyRegions() {
@@ -740,10 +828,27 @@ void World::rebuildDirtyRegions() {
 }
 
 void World::requestMesh(const SectionKey& key) {
-    if (Chunk* chunk = findChunk(chunkKeyX(key.column), chunkKeyZ(key.column))) {
-        chunk->sections[key.section].rebuildNeeded = true;
-        if (meshQueue.insert(key).second) pushMesh(key, *chunk);//not already queued
+    if (Chunk* chunk = findChunk(chunkKeyX(key.column), chunkKeyZ(key.column))) requestMesh(key, *chunk);
+}
+
+void World::requestMesh(const SectionKey& key, Chunk& chunk) {
+    ChunkSection& section = chunk.sections[key.section];
+    section.rebuildNeeded = true;
+    if (!section.queued) {
+        section.queued = true;
+        chunk.pendingMeshes++;
+        pushMesh(key, chunk);
     }
+}
+
+void World::meshFinished(uint64_t key, Chunk& chunk) {
+    if (chunk.pendingMeshes == 0) return;//a job from before it was unloaded and loaded again
+    if (--chunk.pendingMeshes == 0) farTerrain->chunkChanged(chunkKeyX(key), chunkKeyZ(key));//maybe fully drawn now
+}
+
+bool World::chunkShown(int chunkX, int chunkZ) const {
+    const Chunk* chunk = findChunk(chunkX, chunkZ);
+    return chunk && chunk->isActive && chunk->pendingMeshes == 0 && neighboursReady(getChunkKey(chunkX, chunkZ));
 }
 
 void World::requestColumnMesh(uint64_t key) {
@@ -753,7 +858,7 @@ void World::requestColumnMesh(uint64_t key) {
         const ChunkSection& section = chunk->sections[s];
         // All air with nothing drawn: neighbours changing can't give it faces, skip it (most of the sky)
         if (section.isEmpty() && section.mesh.capacity == 0) continue;
-        requestMesh({ key, s });
+        requestMesh({ key, s }, *chunk);
     }
 }
 
@@ -939,7 +1044,9 @@ void World::setBlock(const glm::ivec3& worldPos, BlockType type) {
 
     int localX = worldPos.x - chunkX * Chunk::chunkSize;
     int localZ = worldPos.z - chunkZ * Chunk::chunkSize;
+    size_t bytesBefore = chunk->sections[localY / ChunkSection::size].memoryBytes();
     if (!chunk->setBlock(localX, localY, localZ, type)) return;//already that block
+    blockBytes += chunk->sections[localY / ChunkSection::size].memoryBytes() - bytesBefore;//a first edit makes a 4 KB array
 
     int sectionIndex = localY / ChunkSection::size;
     int sectionY = localY % ChunkSection::size;

@@ -102,5 +102,6 @@ private:
 	std::string runName;//benchmark_<start time>, shared by the report and screenshots
 	int screenshotsTaken = 0;
 	WorldStats finalStats;
+	size_t processBytes = 0, peakProcessBytes = 0;//RAM of the whole game, see processMemory
 	RenderStats lastRender;
 };

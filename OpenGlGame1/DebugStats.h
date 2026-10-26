@@ -48,6 +48,7 @@ struct UpdateTimes {
 	float launchMs = 0.0f;//choosing chunks to mesh and copying their blocks for the workers
 	float mergeMs = 0.0f;//copying region meshes together on the GPU
 	float lodMs = 0.0f;//re-picking levels of detail (zooming, turning while zoomed, settings)
+	float farMs = 0.0f;//far terrain: which units are needed, starting and finishing their builds
 };
 
 // What the renderer drew last frame
@@ -60,6 +61,7 @@ struct RenderStats {
 	int64_t triangles = 0;
 	int sectionsByLod[4] = {};//sections drawn on their own at each level of detail, 0 = full detail
 	int mergedRegionsDrawn = 0;//regions drawn as one merged mesh, part of drawCommands
+	int farUnitsDrawn = 0;//far terrain units, past detail distance
 	int shadowDrawCalls = 0;
 	int64_t shadowTriangles = 0;
 };

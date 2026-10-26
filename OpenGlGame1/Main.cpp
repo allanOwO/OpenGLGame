@@ -243,7 +243,9 @@ void Main::startWorld(const WorldInfo& info) {
     currentWorld = info;
     std::cout << "Opening world '" << info.name << "', seed " << info.seed << std::endl;
 
-    world = std::make_unique<World>(info.seed, settings.renderDistance);
+    // Real chunks out to the detail distance, far terrain from there to render distance
+    world = std::make_unique<World>(info.seed, std::min(settings.detailDistance, settings.renderDistance));
+    world->setFarDistance(settings.renderDistance);
     world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
     world->setSimulationDistance(settings.simulationDistance);
     // Edited chunks come from the save, everything else regenerates from the seed (missing file = new world)
@@ -297,7 +299,8 @@ void Main::startBenchmark() {
     std::cout << "Starting benchmark, render distance " << settings.renderDistance << std::endl;
 
     // A fresh world every run, nothing is loaded from or saved to disk so runs can't affect each other
-    world = std::make_unique<World>(Benchmark::seed, settings.renderDistance);
+    world = std::make_unique<World>(Benchmark::seed, std::min(settings.detailDistance, settings.renderDistance));
+    world->setFarDistance(settings.renderDistance);
     world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
     world->setSimulationDistance(settings.simulationDistance);
     player = std::make_unique<Player>(window);//not moved, but the rest of Main expects one alongside a world
@@ -380,7 +383,8 @@ void Main::handleMenuAction(const MenuAction& action) {
 
     case Type::SettingsChanged:
         if (world) {
-            world->setRenderDistance(settings.renderDistance);
+            world->setRenderDistance(std::min(settings.detailDistance, settings.renderDistance));
+            world->setFarDistance(settings.renderDistance);
             world->setLodDistances(settings.lod2xPercent, settings.lod4xPercent, settings.lod8xPercent);
             world->setSimulationDistance(settings.simulationDistance);
         }
@@ -522,7 +526,7 @@ void Main::run() {
         glm::mat4 view(1.0f);
         float sunTime = currentFrame;
         float zoom = 1.0f;
-        float farPlane = world ? (world->getRenderDistance() + 2) * Chunk::chunkSize * 1.5f : 1.0f;
+        float farPlane = world ? (world->getFarDistance() + 2) * Chunk::chunkSize * 1.5f : 1.0f;
         LodView lodView;
         if (benchmark) {
             benchmark->update(*world, frameSeconds);//uncapped, so the path takes the same real time on any machine

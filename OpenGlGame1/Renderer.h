@@ -87,6 +87,7 @@ private:
 	int64_t drawList(const World& world, const glm::vec3* viewPoint, const glm::vec3& viewDirection);
 	// Fills visibleSections with the sections inside the frustum that have a mesh, testing whole regions first
 	// nearestFirst sorts regions by distance (chunks within a region are close together, so that's near enough for depth)
+	// The main pass also adds far terrain (the shadow pass doesn't, shadows only cover the area around the player)
 	void collectVisible(const World& world, const Frustum& view, const glm::vec3& cameraPos, bool nearestFirst, bool countStats);
 	struct VisibleRegion {
 		float distanceSquared;

@@ -1,0 +1,49 @@
+Benchmark 2026-10-26 00:17:59
+SEED 1337  RENDER DISTANCE 1000  DETAIL 128  LOD 15/30/60%  SIMULATION 16  1920X1080  RELEASE
+AMD Radeon RX 9060 XT
+
+LOAD    66049 CHUNKS IN 1.73 S  GENERATE 0.06 MS  MESH 0.02 MS PER CHUNK
+SPIN    AVG 1485 FPS  1% LOW 1084  CPU 0.38 MS  GPU 0.54 MS
+FLIGHT  AVG 1285 FPS  1% LOW 510  CPU 0.43 MS  GPU 0.59 MS  504 CHUNKS/S
+EDITS   100 EDITS  EDIT TO SCREEN 3.3 MS  MESH 0.02 MS
+SCENE   1.00M TRIANGLES  2140 DRAWS
+MEMORY  BLOCKS 32.5 MB  MESHES 115.7 MB  WHOLE GAME 304.9 MB (PEAK 359.2 MB)
+
+phase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_cmds
+load        1.73     639    369.8       188.8     21.68      1.768      0.603   1.008      0.185     921880        6547
+spin       10.00   14855   1485.5      1084.2      7.66      0.144      0.232   0.542      0.171     999415        2140
+flight     20.01   25712   1285.2       510.0     19.63      0.190      0.244   0.586      0.178    1155617        2424
+edits       5.50    6929   1259.7       870.2     48.32      0.143      0.235   0.575      0.172    1129513        2196
+zoom       12.00   17092   1424.3       481.1     20.79      0.237      0.193   0.489      0.172     926580         891
+
+slowest 1% of frames (99th percentile, ms)
+phase       frame   update   render      gpu
+load         5.30     4.04     1.03     1.46
+spin         0.92     0.19     0.33     0.62
+flight       1.96     1.19     0.35     0.67
+edits        1.15     0.18     0.33     0.66
+zoom         2.08     1.76     0.31     0.68
+
+slowest 1% of world update parts (99th percentile, ms)
+phase        area    apply     load   upload   launch    merge      lod      far
+load         0.00     0.69     0.48     0.83     2.06     1.01     0.00     0.79
+spin         0.00     0.00     0.00     0.00     0.00     0.00     0.00     0.19
+flight       0.00     0.00     0.00     0.35     0.50     0.39     0.00     0.39
+edits        0.00     0.00     0.00     0.00     0.01     0.00     0.00     0.17
+zoom         0.00     0.00     0.00     0.50     0.50     0.17     1.00     0.19
+
+average world update parts (ms)
+phase        area    apply     load   upload   launch    merge      lod      far
+load        0.000    0.283    0.087    0.194    0.834    0.140    0.000    0.228
+spin        0.000    0.000    0.000    0.000    0.000    0.000    0.000    0.143
+flight      0.003    0.001    0.003    0.008    0.014    0.016    0.000    0.143
+edits       0.000    0.000    0.000    0.001    0.002    0.001    0.000    0.137
+zoom        0.000    0.000    0.000    0.031    0.034    0.011    0.016    0.144
+
+worst single frame of each world update part (ms)
+phase        area    apply     load   upload   launch    merge      lod      far
+load         0.00     2.18     0.97     1.61     3.89     1.09     0.00     1.43
+spin         0.00     0.00     0.00     0.00     0.00     0.00     0.00     0.60
+flight       1.89     0.40     0.63     0.55     0.58     1.04     0.01     1.39
+edits        0.00     0.22     0.54     0.46     0.50     1.03     0.00     1.19
+zoom         0.15     0.00     0.00     0.90     1.38     1.01     1.04     0.89

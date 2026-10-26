@@ -27,6 +27,7 @@ bool Settings::load(const std::string& path) {
 			else if (key == "lod2xPercent") lod2xPercent = std::clamp(std::stoi(value), 1, 100);
 			else if (key == "lod4xPercent") lod4xPercent = std::clamp(std::stoi(value), 1, 100);
 			else if (key == "lod8xPercent") lod8xPercent = std::clamp(std::stoi(value), 1, 100);
+			else if (key == "detailDistance") detailDistance = std::clamp(std::stoi(value), minRenderDistance, maxRenderDistance);
 			else if (key == "simulationDistance") simulationDistance = std::clamp(std::stoi(value), minSimulationDistance, maxRenderDistance);
 			// unknown keys are ignored, so files from newer versions still load
 		}
@@ -50,5 +51,6 @@ bool Settings::save(const std::string& path) const {
 	file << "lod4xPercent=" << lod4xPercent << "\n";
 	file << "lod8xPercent=" << lod8xPercent << "\n";
 	file << "simulationDistance=" << simulationDistance << "\n";
+	file << "detailDistance=" << detailDistance << "\n";
 	return static_cast<bool>(file);
 }

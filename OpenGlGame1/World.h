@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
@@ -17,6 +19,7 @@
 #include "ChunkMeshPool.h"
 #include "ThreadPool.h"
 #include "Frustum.h"
+#include "FarTerrain.h"
 
 // Result of World::raycast
 struct RaycastHit {
@@ -32,6 +35,10 @@ struct ChunkRegion {
 	glm::ivec2 coords;//in regions
 	std::vector<Chunk*> chunks;//loaded chunks inside it, pointers stay valid because unordered_map never moves its elements
 	MeshAllocation merged;//sections in each chunk's mergedSections, copied end to end
+	// False once the renderer has checked that every active section in it is in `merged`, so it can skip the
+	// region's 64 columns entirely. World sets it again whenever a section might be drawn on its own
+	// (at render distance 400 visiting every column of every region was most of the CPU's frame)
+	mutable bool mayHaveLoose = true;
 	double dirtyTime = 0.0;//last time something in it changed (nowSeconds), it's merged again once that settles
 
 	glm::vec3 origin() const {//world position of its corner, what every vertex in it is relative to
@@ -75,6 +82,7 @@ public:
 	const TerrainGenerator& getTerrain() const { return terrain; }
 	const ChunkMeshPool& getMeshPool() const { return meshPool; }
 	const std::unordered_map<uint64_t, ChunkRegion>& getRegions() const { return regions; }
+	const std::unordered_map<uint64_t, FarUnit>& getFarUnits() const { return farTerrain->getUnits(); }
 	int getSeed() const { return terrain.getSeed(); }
 
 	void setRenderDistance(int chunks);//can change while playing, chunks load/unload to match
@@ -82,7 +90,10 @@ public:
 	// Nothing simulates yet, it's what water, crops etc. would use later. At or above render distance nothing merges
 	void setSimulationDistance(int chunks);
 	int getSimulationDistance() const { return simulationDistance; }
-	int getRenderDistance() const { return renderDistance; }
+	int getRenderDistance() const { return renderDistance; }//how far real chunks are loaded (the detail distance)
+	// How far anything is drawn. Past the detail distance it's FarTerrain's heightfield units, not chunks
+	void setFarDistance(int chunks) { farDistance = chunks; }
+	int getFarDistance() const { return std::max(farDistance, renderDistance); }
 
 	// Where each LOD level starts, as a percentage of render distance: 2x blocks, 4x blocks, 8x blocks
 	// 100 means that level is never used
@@ -122,6 +133,10 @@ private:
 	void generateChunkAsync(int chunkX, int chunkZ);
 	void tryApplyChunkGeneration(bool waitForAll = false);
 	void markNeighboursForRebuild(int chunkX, int chunkZ);
+	// All 8 neighbours are loaded, or are outside render distance (they won't be, so they count as air)
+	// A chunk is only meshed once this is true: its border faces and corner shading depend on them,
+	// and meshing before they arrive meant meshing again for each one (up to ~5 times per chunk while loading)
+	bool neighboursReady(uint64_t key) const;
 	void findNeighbours(uint64_t key, const Chunk* neighbours[8]) const;//order as in Chunk::makeMeshInput
 
 	// meshing
@@ -129,6 +144,7 @@ private:
 	// Starts a mesh job for the section, or clears its mesh straight away if it can't have faces. False if no job was needed
 	bool launchSectionMesh(const SectionKey& key, Chunk& chunk);
 	void requestMesh(const SectionKey& key);//section's mesh is out of date, rebuild it when a worker is free
+	void requestMesh(const SectionKey& key, Chunk& chunk);//same when the chunk is already found
 	void requestColumnMesh(uint64_t key);//every section of a column that could have faces
 
 	TerrainGenerator terrain;
@@ -143,10 +159,25 @@ private:
 	std::unordered_map<uint64_t, Chunk> chunks;
 	std::unordered_map<uint64_t, ChunkRegion> regions;//same chunks grouped for culling, kept in step with chunks
 	void addToRegion(uint64_t key, Chunk& chunk);
+	void markRegionLoose(uint64_t chunkKey);//a section in it may now be drawn on its own, see ChunkRegion::mayHaveLoose
+	void setActive(uint64_t key, Chunk& chunk, bool active);//keeps activeChunks right
+
+	// Running totals for getStats, adding them up over every chunk took ~150 ms at render distance 400
+	size_t blockBytes = 0;
+	int activeChunks = 0;
 	void removeFromRegion(uint64_t key, Chunk& chunk);
 
 	// merged region meshes
 	int simulationDistance = 16;
+
+	// far terrain
+	int farDistance = 0;
+	std::unique_ptr<FarTerrain> farTerrain;//made in the constructor, after the pool and workers it uses
+	// Highest block of each edited chunk that isn't loaded, so far terrain can still show it (FarTerrain)
+	std::unordered_map<uint64_t, int16_t> editedTops;
+	static int highestBlock(const std::vector<BlockType>& flat);
+	bool chunkShown(int chunkX, int chunkZ) const;//loaded, active and every section meshed
+	void meshFinished(uint64_t key, Chunk& chunk);//one of its pending meshes is done (or wasn't needed)
 	std::unordered_set<uint64_t> dirtyRegions;//region keys whose merged mesh is out of date
 	bool mergesColumn(uint64_t key) const;//outside simulation distance, so it belongs in its region's merged mesh
 	void markRegionDirty(uint64_t chunkKey);//something in this chunk's region changed
@@ -189,14 +220,13 @@ private:
 	bool areaChanged = true;//player chunk or render distance changed since active/unload were last worked out
 
 	// Sections whose mesh is out of date, so meshing doesn't have to look through every loaded chunk each frame
-	// meshQueue says what's queued (so nothing is queued twice), meshHeap hands out the nearest first
+	// ChunkSection::queued says what's queued (so nothing is queued twice), meshHeap hands out the nearest first
 	// Sorting every queued section each frame cost 8 ms with tens of thousands queued, a heap only touches the few it hands out
 	struct QueuedMesh {
 		float distanceSquared;//to the player when queued, refreshed when the player changes chunk
 		SectionKey key;
 		bool operator>(const QueuedMesh& other) const { return distanceSquared > other.distanceSquared; }
 	};
-	std::unordered_set<SectionKey, SectionKeyHash> meshQueue;
 	std::priority_queue<QueuedMesh, std::vector<QueuedMesh>, std::greater<QueuedMesh>> meshHeap;//smallest distance on top
 	std::vector<SectionKey> parkedMeshes;//queued but outside render distance, back in the heap when the player moves
 	glm::vec3 lastPlayerPosition = glm::vec3(0.0f);

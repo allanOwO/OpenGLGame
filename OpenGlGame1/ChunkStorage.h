@@ -26,6 +26,8 @@ public:
 	bool take(uint64_t key, std::vector<uint8_t>& outData);
 
 	size_t size() const { return chunks.size(); }
+	template <typename Visit>
+	void forEach(Visit visit) const { for (const auto& pair : chunks) visit(pair.first, pair.second); }
 
 	// Chunk file layout (little endian):
 	//   "VXCK" magic, uint32 file version, uint32 chunk count

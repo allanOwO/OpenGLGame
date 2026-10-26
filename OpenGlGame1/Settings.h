@@ -6,10 +6,13 @@
 // Old files without the new key just keep the default, so nothing breaks
 struct Settings {
 	static constexpr int minRenderDistance = 4;
-	static constexpr int maxRenderDistance = 200;
+	static constexpr int maxRenderDistance = 1000;
 
 	// Graphics
-	int renderDistance = 16;//in chunks
+	int renderDistance = 16;//in chunks, how far anything is drawn
+	// How far real chunks are loaded. Past it (out to render distance) terrain is drawn from the terrain generator
+	// as far units (see FarTerrain): much cheaper, but no blocks to edit and no caves or overhangs
+	int detailDistance = 128;//in chunks
 	// Where each level of detail starts, as a percentage of render distance (100 = never)
 	// Always in order: 2x starts before 4x, 4x before 8x (Menu keeps them that way)
 	int lod2xPercent = 15;
