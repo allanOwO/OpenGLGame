@@ -35,7 +35,9 @@ namespace {
 		const std::vector<uint8_t>& excluded, const std::vector<std::pair<int, int>>& edited) {
 		const int B = FarUnit::unitBlocks;
 		const int n = B / cell;
-		const int step = std::max(4, cell / 4);//sample spacing, a cell's highest sample is its height
+		// Sample spacing, a cell's highest sample is its height. Zoomed cells (4, 8) sample every 2 blocks:
+		// every block would be 4x the noise for detail too small to see even zoomed
+		const int step = cell <= 8 ? 2 : cell / 4;
 		const int side = B / step + 1;//the far edge too: it's the next unit's first column, so neighbours agree on it
 
 		// Heights at every sample point, chunk local y like Chunk::heights
@@ -57,16 +59,30 @@ namespace {
 				height[j * n + i] = highest;
 			}
 		}
+		// An edited chunk raises every cell it covers (several when zoomed cells are smaller than a chunk)
+		const int cellsPerChunk = std::max(1, Chunk::chunkSize / cell);
 		for (const auto& entry : edited) {
 			int chunkX = entry.first % FarUnit::unitChunks, chunkZ = entry.first / FarUnit::unitChunks;
-			int i = chunkX * Chunk::chunkSize / cell, j = chunkZ * Chunk::chunkSize / cell;
-			height[j * n + i] = std::max(height[j * n + i], entry.second);
+			int firstI = chunkX * Chunk::chunkSize / cell, firstJ = chunkZ * Chunk::chunkSize / cell;
+			for (int j = firstJ; j < firstJ + cellsPerChunk; j++)
+				for (int i = firstI; i < firstI + cellsPerChunk; i++)
+					height[j * n + i] = std::max(height[j * n + i], entry.second);
 		}
 
-		// Cells only line up with chunks at 16 blocks, which is the only size units next to the near tier use
+		// Cells only line up with chunks at 16 blocks or less, which units next to the near tier always are
 		auto shown = [&](int i, int j) {
 			if (i < 0 || j < 0 || i >= n || j >= n) return false;
-			return excluded.empty() || !excluded[j * FarUnit::unitChunks + i];
+			if (excluded.empty()) return true;
+			int chunkX = i * cell / Chunk::chunkSize, chunkZ = j * cell / Chunk::chunkSize;
+			return !excluded[chunkZ * FarUnit::unitChunks + chunkX];
+		};
+		// A wall from floor up to top (exclusive), banded like generated chunks: grass on the top block,
+		// dirt for the 3 under it, stone below. addBand(bottom, height, type) appends one quad
+		auto wallBands = [](int floor, int top, auto addBand) {
+			int grassFloor = std::max(floor, top - 1), dirtFloor = std::max(floor, top - 4);
+			if (dirtFloor > floor) addBand(floor, dirtFloor - floor, BlockType::STONE);
+			if (grassFloor > dirtFloor) addBand(dirtFloor, grassFloor - dirtFloor, BlockType::DIRT);
+			addBand(grassFloor, top - grassFloor, BlockType::GRASS);
 		};
 		// Open edges (the unit's border, and around near chunks) have walls down past the lowest ground
 		int lowest = Chunk::chunkHeight;
@@ -92,15 +108,20 @@ namespace {
 			for (int edge = 0; edge <= n; edge++) {
 				bool left = shown(edge - 1, j), right = shown(edge, j);
 				int leftTop = left ? height[j * n + edge - 1] + 1 : 0, rightTop = right ? height[j * n + edge] + 1 : 0;
+				// Facing x the quad's sides run along y then z
+				auto addX = [&](int direction) {
+					return [&, direction](int bottom, int tall, BlockType type) {
+						Chunk::appendQuad(groups, glm::ivec3(edge * cell, bottom, j * cell),
+							glm::ivec3(0, tall, 0), glm::ivec3(0, 0, cell), 0, direction, type);
+					};
+				};
 				if (left) {
 					int floor = right ? rightTop : lowest;
-					if (leftTop > floor) Chunk::appendQuad(groups, glm::ivec3(edge * cell, floor, j * cell),
-						glm::ivec3(0, leftTop - floor, 0), glm::ivec3(0, 0, cell), 0, 1, BlockType::GRASS);
+					if (leftTop > floor) wallBands(floor, leftTop, addX(1));
 				}
 				if (right) {
 					int floor = left ? leftTop : lowest;
-					if (rightTop > floor) Chunk::appendQuad(groups, glm::ivec3(edge * cell, floor, j * cell),
-						glm::ivec3(0, rightTop - floor, 0), glm::ivec3(0, 0, cell), 0, -1, BlockType::GRASS);
+					if (rightTop > floor) wallBands(floor, rightTop, addX(-1));
 				}
 			}
 		}
@@ -108,15 +129,20 @@ namespace {
 			for (int edge = 0; edge <= n; edge++) {
 				bool back = shown(i, edge - 1), front = shown(i, edge);
 				int backTop = back ? height[(edge - 1) * n + i] + 1 : 0, frontTop = front ? height[edge * n + i] + 1 : 0;
+				// Facing z the quad's sides run along x then y
+				auto addZ = [&](int direction) {
+					return [&, direction](int bottom, int tall, BlockType type) {
+						Chunk::appendQuad(groups, glm::ivec3(i * cell, bottom, edge * cell),
+							glm::ivec3(cell, 0, 0), glm::ivec3(0, tall, 0), 2, direction, type);
+					};
+				};
 				if (back) {
 					int floor = front ? frontTop : lowest;
-					if (backTop > floor) Chunk::appendQuad(groups, glm::ivec3(i * cell, floor, edge * cell),
-						glm::ivec3(cell, 0, 0), glm::ivec3(0, backTop - floor, 0), 2, 1, BlockType::GRASS);
+					if (backTop > floor) wallBands(floor, backTop, addZ(1));
 				}
 				if (front) {
 					int floor = back ? backTop : lowest;
-					if (frontTop > floor) Chunk::appendQuad(groups, glm::ivec3(i * cell, floor, edge * cell),
-						glm::ivec3(cell, 0, 0), glm::ivec3(0, frontTop - floor, 0), 2, -1, BlockType::GRASS);
+					if (frontTop > floor) wallBands(floor, frontTop, addZ(-1));
 				}
 			}
 		}
@@ -159,6 +185,19 @@ bool FarTerrain::isSettled() const {
 	return true;
 }
 
+void FarTerrain::setView(const LodView& view) {
+	lodView = view;
+	needsRefresh = true;
+}
+
+int FarTerrain::cellForDistance(float chunks) const {
+	// Only zoom brings a unit this close: under half detail distance looks close enough for 4 block cells
+	if (chunks <= detailDistance * 0.5f) return 4;
+	if (chunks <= detailDistance) return 8;
+	if (chunks <= detailDistance + FarUnit::unitChunks) return 16;
+	return chunks <= detailDistance * 2 + 64 ? 32 : 64;
+}
+
 void FarTerrain::refreshUnits() {
 	for (auto& pair : units) pair.second.leaving = true;//until shown to be needed below
 	if (renderDistance <= detailDistance) return;//no far tier, everything is near chunks
@@ -175,16 +214,26 @@ void FarTerrain::refreshUnits() {
 			// Needed if some of it is past detail distance and some of it is within render distance
 			if (nearest > renderDistance || furthest <= detailDistance) continue;
 
-			// Coarser cells further out. Units that reach into the near tier have to use 16 (one cell per chunk)
-			// so they can leave out exactly the chunks the near tier draws
-			int cell = nearest <= detailDistance + FarUnit::unitChunks ? 16
-				: nearest <= detailDistance * 2 + 64 ? 32 : 64;
-
 			uint64_t key = getChunkKey(ux, uz);
 			auto inserted = units.try_emplace(key);
 			FarUnit& unit = inserted.first->second;
 			if (inserted.second) unit.coords = coords;
 			unit.leaving = false;
+
+			// Coarser cells further out. Units that reach into the near tier have to use 16 or less
+			// (cells inside one chunk) so they can leave out exactly the chunks the near tier draws
+			int cell = std::max(16, cellForDistance(static_cast<float>(nearest)));//4 and 8 are only for zoom
+			if (lodView.zoom > 1.0f) {
+				// Inside the zoomed view it's the detail of something zoom times nearer, only ever finer,
+				// the same as World::targetLod. Still near the view: keep it, so panning doesn't rebuild it
+				glm::vec3 min = unit.origin();
+				glm::vec3 max = min + glm::vec3(FarUnit::unitBlocks, Chunk::chunkHeight, FarUnit::unitBlocks);
+				if (lodView.zoomedView.isBoxInFrustum(min, max))
+					cell = std::min(cell, cellForDistance(nearest / lodView.zoom));
+				if (unit.wantedCellSize != 0 && unit.wantedCellSize < cell && lodView.keepView.isBoxInFrustum(min, max))
+					cell = unit.wantedCellSize;
+			}
+
 			if (unit.wantedCellSize != cell) {
 				unit.wantedCellSize = cell;
 				unit.dirty = true;

@@ -146,7 +146,8 @@ void DebugOverlay::draw(UI& ui, const World& world, const Renderer& renderer,
 			+ "  CPU THREADS " + std::to_string(std::thread::hardware_concurrency()), white },
 		{ "PER CHUNK GENERATE " + fixed(shownGenerationMs, 2) + " MS  MESH " + fixed(shownMeshMs, 2) + " MS", white },
 		{ "BLOCK EDIT TO SCREEN " + fixed(shownEditLatencyMs, 1) + " MS", white },
-		{ "MEMORY BLOCKS " + megabytes(worldStats.blockBytes) + "  MESHES " + megabytes(worldStats.meshBytes), white },
+		{ "MEMORY BLOCKS " + megabytes(worldStats.blockBytes) + "  CHUNKS " + megabytes(worldStats.chunkBytes)
+			+ "  MESHES " + megabytes(worldStats.meshBytes), white },
 		{ "", white },
 		{ gpuName, grey },
 	};

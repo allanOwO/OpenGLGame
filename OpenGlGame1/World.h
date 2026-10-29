@@ -47,15 +47,6 @@ struct ChunkRegion {
 	}
 };
 
-// What World needs from the camera to pick each column's level of detail
-// Zooming makes far things look close, so inside the zoomed view they get the detail of something zoom times nearer
-struct LodView {
-	float zoom = 1.0f;//1 = not zoomed
-	glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);//camera direction, only looked at while zoomed
-	Frustum zoomedView;//what the zoomed camera sees, only set while zoomed
-	Frustum keepView;//a wider view around it, columns inside keep their zoom detail (see World::checkLod)
-};
-
 // Owns every chunk: loading, unloading, generation and meshing jobs, and block access in world coordinates
 // Only the main thread calls into World, worker threads get copies of what they need
 // Needs a GL context for its lifetime (the mesh pool)

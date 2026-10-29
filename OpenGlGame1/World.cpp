@@ -83,6 +83,10 @@ WorldStats World::getStats() const {
     stats.editLatency = JobTotals::of(editLatencyTimer);
     stats.chunksActive = activeChunks;
     stats.blockBytes = blockBytes;
+    // Each map node is the key/Chunk pair plus two list pointers, and the bucket array is two pointers a bucket
+    // (MSVC's layout). At render distance 1000 this was most of the process's memory, and blockBytes never saw it
+    stats.chunkBytes = chunks.size() * (sizeof(std::pair<const uint64_t, Chunk>) + 2 * sizeof(void*))
+        + chunks.bucket_count() * 2 * sizeof(void*);
     stats.meshBytes = meshPool.usedBytes();
     stats.dirtyRegions = static_cast<int>(dirtyRegions.size());
     return stats;
@@ -187,6 +191,7 @@ void World::update(const glm::vec3& playerPosition, const LodView& view) {
     bool turned = glm::dot(view.forward, lastLodForward) < std::cos(std::max(viewWidth / 8.0f, glm::radians(0.5f)));
     if (zoomChanged || (zoomed && (moved > 0.0f || turned))) {
         updateZoomedLods();
+        farTerrain->setView(view);
         lastLodForward = view.forward;
     }
     updateTimes.areaMs = msSince(start);
@@ -420,7 +425,7 @@ std::unordered_map<uint64_t, Chunk>::iterator World::unloadChunk(std::unordered_
     }
     farTerrain->chunkChanged(chunkKeyX(it->first), chunkKeyZ(it->first));
     // Any mesh job still running for it only has a copy, its result is dropped when it finishes
-    for (ChunkSection& section : it->second.sections) meshPool.release(section.mesh);
+    for (SectionMesh& entry : it->second.meshes) meshPool.release(entry.mesh);
     removeFromRegion(it->first, it->second);
     setActive(it->first, it->second, false);
     blockBytes -= it->second.memoryBytes();
@@ -480,11 +485,13 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
 
     // Open sky and solid rock: no faces, so no job, just make sure nothing old is still drawn
     if (chunk.sectionHasNoFaces(key.section, neighbours)) {
-        meshPool.release(section.mesh);
-        chunk.updateMeshedBit(key.section);
+        if (SectionMesh* entry = chunk.findMesh(key.section)) {
+            meshPool.release(entry->mesh);
+            entry->pendingEditTime = -1.0;
+        }
         sectionMeshChanged(key.column, chunk, key.section);
+        chunk.updateMeshedBit(key.section);//after, so a merged slice marked old there lets its SectionMesh go
         markRegionLoose(key.column);
-        section.pendingEditTime = -1.0;
         meshFinished(key.column, chunk);
         return false;
     }
@@ -498,9 +505,10 @@ bool World::launchSectionMesh(const SectionKey& key, Chunk& chunk) {
         input = chunk.makeMeshInput(key.section, neighbours);
     }
     MeshJob& job = chunkMeshFutures[key];
-    job.editTime = section.pendingEditTime;//this job's copy includes that edit
+    SectionMesh* entry = chunk.findMesh(key.section);
+    job.editTime = entry ? entry->pendingEditTime : -1.0;//this job's copy includes that edit
     job.lod = chunk.lod;
-    section.pendingEditTime = -1.0;
+    if (entry) entry->pendingEditTime = -1.0;
     JobTimer* timer = &meshTimer;
     int lod = chunk.lod;
     int chunkX = chunkKeyX(key.column), chunkZ = chunkKeyZ(key.column);
@@ -532,10 +540,11 @@ void World::processChunkMeshing(const glm::vec3& playerPosition) {
 
         MeshData mesh = job.future.get();
         if (Chunk* chunk = findChunk(chunkKeyX(it->first.column), chunkKeyZ(it->first.column))) {
-            meshPool.upload(chunk->sections[it->first.section].mesh, mesh.vertices, mesh.groupCounts);
-            chunk->sections[it->first.section].meshLod = job.lod;
-            chunk->updateMeshedBit(it->first.section);
+            SectionMesh& entry = chunk->meshState(it->first.section);
+            meshPool.upload(entry.mesh, mesh.vertices, mesh.groupCounts);
+            entry.meshLod = job.lod;
             sectionMeshChanged(it->first.column, *chunk, it->first.section);
+            chunk->updateMeshedBit(it->first.section);//last, it may drop the entry
             markRegionLoose(it->first.column);
             meshFinished(it->first.column, *chunk);
             // The edit is on screen from the next frame
@@ -683,7 +692,10 @@ void World::sectionMeshChanged(uint64_t key, Chunk& chunk, int section) {
     // In the merged mesh: that copy is now old. Outside simulation distance: it should join the merged mesh
     // Neither (close to the player, the usual case for edits): it's drawn on its own, nothing to redo
     bool merged = chunk.mergedSections & (1u << section);
-    if (merged) chunk.sections[section].mergedCount = 0;//the merged mesh still draws the old one until it's rebuilt
+    if (merged) {
+        //the merged mesh still draws the old one until it's rebuilt
+        if (SectionMesh* entry = chunk.findMesh(section)) entry->mergedCount = 0;
+    }
     if (merged || mergesColumn(key)) markRegionDirty(key);
 }
 
@@ -720,7 +732,7 @@ void World::rebuildRegion(ChunkRegion& region) {
     // or its slice of the current merged mesh. The new merged mesh is copied together from those,
     // group by group: every member's -X faces, then every member's -Z faces... so the merged mesh is grouped too
     struct Member {
-        ChunkSection* section;
+        SectionMesh* section;//nothing adds to or drops from Chunk::meshes until the end, so these stay good
         int page;
         GLint first[faceGroupCount];//where each group is now
         GLsizei count[faceGroupCount];
@@ -728,7 +740,7 @@ void World::rebuildRegion(ChunkRegion& region) {
     std::vector<Member> members;
 
     // Where a section's slice of the current merged mesh is, one range per group
-    auto sliceRanges = [&](const ChunkSection& section) {
+    auto sliceRanges = [&](const SectionMesh& section) {
         std::vector<MeshRange> ranges;
         for (int g = 0; g < faceGroupCount; g++) {
             ranges.push_back({ region.merged.page, region.merged.firstVertex + section.mergedFirst[g], section.mergedGroupCounts[g] });
@@ -740,8 +752,8 @@ void World::rebuildRegion(ChunkRegion& region) {
         int chunkX = static_cast<int>(chunk->chunkPosition.x) / Chunk::chunkSize;
         int chunkZ = static_cast<int>(chunk->chunkPosition.z) / Chunk::chunkSize;
         chunk->mergeWanted = mergesColumn(getChunkKey(chunkX, chunkZ)) && chunk->isActive;
-        for (int s = 0; s < Chunk::sectionCount; s++) {
-            ChunkSection& section = chunk->sections[s];
+        for (SectionMesh& section : chunk->meshes) {//sections without one have nothing to draw
+            int s = section.section;
             bool hasSlice = (chunk->mergedSections & (1u << s)) && section.mergedCount > 0;
             if (!chunk->mergeWanted) {
                 // Back inside simulation distance: it'll be drawn on its own again, so it needs its own copy back
@@ -791,7 +803,7 @@ void World::rebuildRegion(ChunkRegion& region) {
     // Every member now lives in the merged mesh only, and is drawn as part of it instead of on its own
     for (Chunk* chunk : region.chunks) chunk->mergedSections = 0;
     for (size_t m = 0; m < members.size(); m++) {
-        ChunkSection& section = *members[m].section;
+        SectionMesh& section = *members[m].section;
         section.mergedCount = 0;
         for (int g = 0; g < faceGroupCount; g++) {
             section.mergedFirst[g] = newFirst[m * faceGroupCount + g];
@@ -801,10 +813,10 @@ void World::rebuildRegion(ChunkRegion& region) {
         meshPool.release(section.mesh);
     }
     for (Chunk* chunk : region.chunks) {
-        for (int s = 0; s < Chunk::sectionCount; s++) {
-            if (chunk->sections[s].mergedCount > 0) chunk->mergedSections |= static_cast<uint16_t>(1u << s);
-            chunk->updateMeshedBit(s);
+        for (const SectionMesh& entry : chunk->meshes) {
+            if (entry.mergedCount > 0) chunk->mergedSections |= static_cast<uint16_t>(1u << entry.section);
         }
+        for (int s = 0; s < Chunk::sectionCount; s++) chunk->updateMeshedBit(s);//may drop entries, so its own loop
     }
     region.mayHaveLoose = true;//columns that left the merge are drawn on their own now, the renderer rechecks
 }
@@ -855,9 +867,9 @@ void World::requestColumnMesh(uint64_t key) {
     Chunk* chunk = findChunk(chunkKeyX(key), chunkKeyZ(key));
     if (!chunk) return;
     for (int s = 0; s < Chunk::sectionCount; s++) {
-        const ChunkSection& section = chunk->sections[s];
         // All air with nothing drawn: neighbours changing can't give it faces, skip it (most of the sky)
-        if (section.isEmpty() && section.mesh.capacity == 0) continue;
+        const SectionMesh* entry = chunk->findMesh(s);
+        if (chunk->sections[s].isEmpty() && (!entry || entry->mesh.capacity == 0)) continue;
         requestMesh({ key, s }, *chunk);
     }
 }
@@ -1050,8 +1062,8 @@ void World::setBlock(const glm::ivec3& worldPos, BlockType type) {
 
     int sectionIndex = localY / ChunkSection::size;
     int sectionY = localY % ChunkSection::size;
-    ChunkSection& section = chunk->sections[sectionIndex];
-    if (section.pendingEditTime < 0.0) section.pendingEditTime = nowSeconds();
+    SectionMesh& editedMesh = chunk->meshState(sectionIndex);
+    if (editedMesh.pendingEditTime < 0.0) editedMesh.pendingEditTime = nowSeconds();
 
     // The edited section, plus every neighbouring section the block is touching:
     // faces and ambient occlusion reach one block across section borders, sideways, up/down and diagonally

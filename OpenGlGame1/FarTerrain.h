@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 
 #include "ChunkMeshPool.h"
+#include "LodView.h"
 #include "MeshData.h"
 #include "ThreadPool.h"
 
@@ -44,6 +45,9 @@ struct FarUnit {
 // Edits far away: when an edited chunk unloads, World remembers its highest block, and the far mesh uses that,
 // so a tower you built is still a pillar on the horizon
 //
+// Zoom: like the near tier's LODs, units inside the zoomed view get the cell size of something zoom times nearer,
+// down to 4 blocks a cell, so zooming in on a far mountain shows its real shape instead of 64 block steps
+//
 // Main thread only, apart from the jobs it gives the workers
 class FarTerrain
 {
@@ -60,13 +64,17 @@ public:
 	void update(const glm::ivec3& playerChunk, int detailDistance, int renderDistance, double budgetSeconds);
 	// A near chunk started or stopped being drawn, the unit around it redoes its hole
 	void chunkChanged(int chunkX, int chunkZ);
+	// The zoom or where it points changed enough to pick cell sizes again. World calls it as often as it rechecks
+	// the near tier's zoomed LODs, not every frame
+	void setView(const LodView& view);
 
 	const std::unordered_map<uint64_t, FarUnit>& getUnits() const { return units; }
 	bool isSettled() const;//nothing waiting to be built (the benchmark waits for this)
 	int jobCount() const { return static_cast<int>(jobs.size()); }
 
 private:
-	void refreshUnits();//which units are needed and at what cell size, after the player or the distances changed
+	void refreshUnits();//which units are needed and at what cell size, after the player, distances or view changed
+	int cellForDistance(float chunks) const;//blocks per cell for a unit this far away (or this far once zoomed)
 	bool coveredByNear(const FarUnit& unit) const;//every chunk under it is drawn by the near tier
 	void startBuild(uint64_t key, FarUnit& unit);
 
@@ -83,6 +91,7 @@ private:
 	};
 	std::unordered_map<uint64_t, Job> jobs;
 
+	LodView lodView;
 	glm::ivec3 playerChunk = glm::ivec3(0);
 	int detailDistance = 0, renderDistance = 0;
 	bool needsRefresh = true;

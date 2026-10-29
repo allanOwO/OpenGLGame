@@ -9,7 +9,7 @@ class World;
 #define GRAVITY -21.0f//as a downwards force
 #define JUMP_HEIGHT 1.2f
 #define SPRINT_SPEED 1.3f
-#define BASE_SPEED 8.0f
+#define BASE_SPEED 4.0f
 
 //players bounding box(collsisions)
 struct AABB {
@@ -48,7 +48,7 @@ public:
 	// Zoom (C toggles, scroll wheel changes how far while zoomed)
 	static constexpr float defaultZoom = 4.0f;
 	static constexpr float minZoom = 2.0f;
-	static constexpr float maxZoom = 16.0f;
+	static constexpr float maxZoom = 128.0f;
 	void toggleZoom();
 	void scrollZoom(float notches);//positive = further in, ignored when not zoomed
 	void updateZoom(float deltaTime);//eases the shown zoom towards where it's heading, once per frame

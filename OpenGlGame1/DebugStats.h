@@ -76,6 +76,7 @@ struct WorldStats {
 	JobTotals meshing;//time to build one chunk mesh on a worker
 	JobTotals editLatency;//block edit -> new mesh uploaded, includes waiting in the queue
 	size_t blockBytes = 0;//CPU memory for block arrays
+	size_t chunkBytes = 0;//CPU memory for the Chunk structs and the map holding them (not counting their mesh lists)
 	size_t meshBytes = 0;//GPU memory for vertex + index buffers
 	int dirtyRegions = 0;//waiting to be merged again
 };

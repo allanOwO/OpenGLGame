@@ -11,7 +11,7 @@
 #include "ResourcePath.h"
 
 static const float SUN_TILT = glm::radians(70.0f);
-static const float SUN_SPEED = 0.1f;
+static const float SUN_SPEED = 0.01f;
 
 Renderer::Renderer() {
     createShadowMap();
@@ -386,7 +386,8 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
             for (uint32_t bits = meshed; bits != 0; bits &= bits - 1) {//clears the lowest set bit each time
                 int s = 0;
                 while (!(bits & (1u << s))) s++;
-                const MeshAllocation& mesh = chunk->sections[s].mesh;
+                const SectionMesh& entry = *chunk->findMesh(s);//its meshed bit means it has one
+                const MeshAllocation& mesh = entry.mesh;
                 glm::vec3 origin = chunk->sectionOrigin(s);
                 if (testSections && !view.isBoxInFrustum(origin, origin + glm::vec3(ChunkSection::size))) {
                     if (countStats) stats.sectionsCulled++;
@@ -396,7 +397,7 @@ void Renderer::collectVisible(const World& world, const Frustum& view, const glm
                 visibleSections.push_back({ &mesh, regionOrigin, corner, corner + glm::vec2(static_cast<float>(ChunkSection::size)) });
                 if (countStats) {
                     stats.sectionsDrawn++;
-                    stats.sectionsByLod[chunk->sections[s].meshLod]++;
+                    stats.sectionsByLod[entry.meshLod]++;
                 }
             }
         }

@@ -16,6 +16,9 @@ class TerrainGenerator;//forward declaration, Chunk only needs a reference
 // The ones the surface passes through are `terrain`: no array either, their blocks are worked out from the
 // column's heights (Chunk::heights). Only a section the player edits gets a real array, 4 KB
 // Meshing per section means a block edit rebuilds 4096 blocks instead of the whole 65536 block column
+//
+// Kept small: every loaded column has 16 of these, so each byte here is 64 MB at render distance 1000
+// Anything about its mesh is in a SectionMesh instead, which only the few sections with faces have
 struct ChunkSection {
 	static constexpr int size = 16;
 	static constexpr int volume = size * size * size;
@@ -23,20 +26,9 @@ struct ChunkSection {
 	std::vector<BlockType> blocks;//empty when every block is `fill`, or when it's terrain
 	BlockType fill = BlockType::AIR;
 	bool terrain = false;//blocks come from the column's heights, see Chunk::terrainBlock
-
-	MeshAllocation mesh;//where its mesh is in World's ChunkMeshPool, World uploads and releases it
-	uint8_t meshLod = 0;//detail level the current mesh was built at (see Chunk::lod), for the debug overlay
-	// While the section is in its region's merged mesh (Chunk::mergedSections), its vertices live only there
-	// (keeping its own copy too doubled mesh memory). This is where, as an offset into the merged mesh
-	// The merged mesh is grouped by face direction too, so the slice is one piece per FaceGroup
-	// mergedCount 0 = that slice is out of date (the section was remeshed since), `mesh` has the newest
-	GLint mergedFirst[faceGroupCount] = {};
-	GLsizei mergedGroupCounts[faceGroupCount] = {};
-	GLsizei mergedCount = 0;//all groups together
 	bool rebuildNeeded = true;
 	bool queued = false;//in World's mesh queue, so it's never added twice (a flag here instead of a set of keys:
 	                    //at render distance 400 the set rehashed ~650k entries in one frame)
-	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
 
 	bool isUniform() const { return blocks.empty() && !terrain; }
 	bool isEmpty() const { return isUniform() && fill == BlockType::AIR; }
@@ -46,6 +38,27 @@ struct ChunkSection {
 	bool set(int x, int y, int z, BlockType type);//false if the block was already that type
 	void compress();//drops the array if every block turned out the same
 	size_t memoryBytes() const { return blocks.capacity() * sizeof(BlockType); }
+};
+
+// A section's mesh and where it is in its region's merged mesh
+// Most sections are open sky or buried rock with nothing to draw, and those used to carry all this anyway:
+// ~100 bytes x 16 sections x 4 million columns was ~6 GB at render distance 1000. Now a column only has one of
+// these per section that has (or had, or is about to have) a mesh, see Chunk::findMesh / meshState
+struct SectionMesh {
+	uint8_t section = 0;//which of the column's sections
+	uint8_t meshLod = 0;//detail level the current mesh was built at (see Chunk::lod), for the debug overlay
+	MeshAllocation mesh;//where its mesh is in World's ChunkMeshPool, World uploads and releases it
+	// While the section is in its region's merged mesh (Chunk::mergedSections), its vertices live only there
+	// (keeping its own copy too doubled mesh memory). This is where, as an offset into the merged mesh
+	// The merged mesh is grouped by face direction too, so the slice is one piece per FaceGroup
+	// mergedCount 0 = that slice is out of date (the section was remeshed since), `mesh` has the newest
+	GLint mergedFirst[faceGroupCount] = {};
+	GLsizei mergedGroupCounts[faceGroupCount] = {};
+	GLsizei mergedCount = 0;//all groups together
+	double pendingEditTime = -1.0;//when the oldest edit not yet in a mesh job happened (nowSeconds), -1 if none
+
+	// Back to how a section with no SectionMesh is, so it can be dropped
+	bool isUnused() const { return mesh.capacity == 0 && mergedCount == 0 && pendingEditTime < 0.0; }
 };
 
 // Everything meshing a section needs from the 3x3 columns around it, when none of them has edited blocks nearby:
@@ -117,6 +130,24 @@ public:
 
 	std::array<ChunkSection, sectionCount> sections;
 
+	// Mesh state of the sections that have any, usually 1-3 near the surface, in no particular order
+	// Pointers and references into it are only good until the next meshState or updateMeshedBit
+	std::vector<SectionMesh> meshes;
+	SectionMesh* findMesh(int section) {
+		for (SectionMesh& entry : meshes) if (entry.section == section) return &entry;
+		return nullptr;
+	}
+	const SectionMesh* findMesh(int section) const {
+		for (const SectionMesh& entry : meshes) if (entry.section == section) return &entry;
+		return nullptr;
+	}
+	SectionMesh& meshState(int section) {//finds it or adds an empty one
+		if (SectionMesh* entry = findMesh(section)) return *entry;
+		meshes.emplace_back();
+		meshes.back().section = static_cast<uint8_t>(section);
+		return meshes.back();
+	}
+
 	// Height of the grass block in each x/z column (chunk local y), index z * chunkSize + x
 	// An unedited column is just this: grass on top, 3 dirt under it, stone the rest of the way down
 	// 512 bytes instead of the ~5 KB of block arrays the surface sections used to take
@@ -132,10 +163,16 @@ public:
 
 	// Bit s set = section s has a mesh to draw. Lets the renderer skip empty sections without touching them,
 	// and gives the column's drawn height range for culling. Kept up to date by updateMeshedBit
+	// Also where a SectionMesh that's gone back to unused is dropped, since every mesh change ends here
 	uint16_t meshedSections = 0;
 	void updateMeshedBit(int section) {
-		if (sections[section].mesh.vertexCount > 0) meshedSections |= static_cast<uint16_t>(1u << section);
+		SectionMesh* entry = findMesh(section);
+		if (entry && entry->mesh.vertexCount > 0) meshedSections |= static_cast<uint16_t>(1u << section);
 		else meshedSections &= static_cast<uint16_t>(~(1u << section));
+		if (entry && entry->isUnused()) {
+			*entry = meshes.back();//order doesn't matter, so swap with the last instead of shifting
+			meshes.pop_back();
+		}
 	}
 
 	// Bit s set = section s is drawn as part of its region's merged mesh instead of on its own (see World::rebuildRegion)

@@ -194,6 +194,7 @@
     <ClInclude Include="Screenshot.h" />
     <ClInclude Include="ChunkMeshPool.h" />
     <ClInclude Include="FarTerrain.h" />
+    <ClInclude Include="LodView.h" />
     <ClInclude Include="GLFunctions.h" />
     <ClInclude Include="DebugOverlay.h" />
     <ClInclude Include="Benchmark.h" />
