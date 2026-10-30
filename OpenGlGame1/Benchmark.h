@@ -17,14 +17,16 @@ class World;
 //   FLIGHT - flies in a straight line, chunks stream in and out the whole time
 //   EDITS  - places then removes blocks at a fixed rate, measures how long an edit takes to show up
 //   ZOOM   - zooms in and out (4x, 8x, 16x, off, 4x) while panning, like pressing C and scrolling
-//            last so the phases before it stay comparable with older runs (it's in the report, not history.csv)
+//            after the older phases so they stay comparable with older runs (it's in the report, not history.csv)
+//   VISTA  - rises high above the terrain and turns a full circle, so nearly the whole render distance is on screen
+//            the most terrain the renderer ever has to draw at once (also only in the report)
 //
 // Results are written to benchmarks/<date>.txt and a line is added to benchmarks/history.csv
 class Benchmark
 {
 public:
-	static constexpr int seed = 1337;
-	static constexpr float sunTime = 12.0f;//fixed sun position (Renderer's time), high enough for shadows
+	static constexpr int seed = 1;
+	static constexpr float sunTime = 120.0f;//fixed sun position (Renderer's time), high enough for shadows
 
 	// world should be brand new, made with Benchmark::seed
 	Benchmark(const World& world, int screenWidth, int screenHeight);
@@ -54,7 +56,7 @@ public:
 	std::vector<std::string> finish();
 
 private:
-	enum class Phase { Load, Spin, Flight, Edits, Zoom, Done };
+	enum class Phase { Load, Spin, Flight, Edits, Zoom, Vista, Done };
 
 	// Everything measured during one phase
 	struct PhaseRecord {
@@ -83,7 +85,7 @@ private:
 
 	Phase phase = Phase::Load;
 	double phaseTime = 0.0;//seconds into the current phase
-	PhaseRecord records[5];
+	PhaseRecord records[6];
 	bool loadTimedOut = false;
 	int chunksAfterLoad = 0;
 	int editsDone = 0;

@@ -534,7 +534,7 @@ void Main::run() {
             cameraPos = benchmark->cameraPos();
             view = benchmark->viewMatrix();
             sunTime = Benchmark::sunTime;
-            zoom = benchmark->zoom();//only its last phase zooms, so the others stay comparable with older runs
+            zoom = benchmark->zoom();//only its zoom phase zooms, so the others stay comparable with older runs
             lodView.zoom = zoom;
             lodView.forward = benchmark->cameraFront();
         }

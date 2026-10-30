@@ -27,6 +27,11 @@ namespace {
 	const double editSeconds = editCount * editInterval + 0.5;//a little extra so the last meshes land
 	const double zoomSeconds = 12.0;
 	const float zoomPanSpeed = 20.0f;//degrees per second, turning while zoomed
+	const double vistaRiseSeconds = 4.0;
+	const double vistaPanSeconds = 20.0;//one full circle once it's up there
+	const double vistaSeconds = vistaRiseSeconds + vistaPanSeconds;
+	const float vistaHeight = 500.0f;//world y, the tallest peaks are under 200
+	const float vistaPitch = -18.0f;//degrees, low enough to see the ground under the camera and the far edge
 	const float pathStep = 4.0f;//blocks between height samples
 	const float clearance = 20.0f;//camera height above the smoothed terrain
 
@@ -142,6 +147,7 @@ const char* Benchmark::phaseName(Phase p) {
 	case Phase::Flight: return "FLIGHT";
 	case Phase::Edits: return "EDITS";
 	case Phase::Zoom: return "ZOOM";
+	case Phase::Vista: return "VISTA";
 	default: return "DONE";
 	}
 }
@@ -153,6 +159,7 @@ std::string Benchmark::status() const {
 	case Phase::Flight: text += " / " + fixed(flightSeconds, 0) + " S"; break;
 	case Phase::Edits: text += " / " + fixed(editSeconds, 1) + " S"; break;
 	case Phase::Zoom: text += " / " + fixed(zoomSeconds, 0) + " S"; break;
+	case Phase::Vista: text += " / " + fixed(vistaSeconds, 0) + " S"; break;
 	default: text += " S"; break;
 	}
 	return text + "   (ESC TO CANCEL)";
@@ -164,6 +171,7 @@ std::string Benchmark::screenshotPath() {
 	if (screenshotsTaken == 0 && phase == Phase::Spin) name = "spin";
 	else if (screenshotsTaken == 1 && phase == Phase::Flight && phaseTime >= flightSeconds * 0.5) name = "flight";
 	else if (screenshotsTaken == 2 && phase == Phase::Zoom && phaseTime >= 5.5) name = "zoom";//8x, 1.5 s after zooming in
+	else if (screenshotsTaken == 3 && phase == Phase::Vista && phaseTime >= vistaRiseSeconds) name = "vista";
 	if (!name) return "";
 
 	screenshotsTaken++;
@@ -224,8 +232,13 @@ void Benchmark::update(World& world, double deltaSeconds) {
 		break;
 	case Phase::Zoom:
 		if (phaseTime >= zoomSeconds) {
-			endPhase(world);
 			zoomLevel = 1.0f;
+			startPhase(Phase::Vista, world);
+		}
+		break;
+	case Phase::Vista:
+		if (phaseTime >= vistaSeconds) {
+			endPhase(world);
 			phase = Phase::Done;
 		}
 		break;
@@ -290,6 +303,16 @@ void Benchmark::placeCamera() {
 		else zoomLevel = 4.0f;
 		break;
 	}
+	case Phase::Vista: {
+		// Straight up from where the flight ended, so no chunks load and it's only drawing that's measured
+		float rise = std::min(static_cast<float>(phaseTime / vistaRiseSeconds), 1.0f);
+		rise = rise * rise * (3.0f - 2.0f * rise);//eases in and out, this one's nice to watch
+		position.y = glm::mix(pathHeight(flightSpeed * static_cast<float>(flightSeconds)), vistaHeight, rise);
+		pitch = glm::mix(-5.0f, vistaPitch, rise);
+		float panTime = std::max(static_cast<float>(phaseTime - vistaRiseSeconds), 0.0f);
+		yaw = zoomPanSpeed * static_cast<float>(zoomSeconds) + 360.0f * panTime / static_cast<float>(vistaPanSeconds);
+		break;
+	}
 	default:
 		break;
 	}
@@ -314,6 +337,7 @@ std::vector<std::string> Benchmark::finish() {
 	const PhaseRecord& flight = records[static_cast<int>(Phase::Flight)];
 	const PhaseRecord& edits = records[static_cast<int>(Phase::Edits)];
 	const PhaseRecord& zoom = records[static_cast<int>(Phase::Zoom)];
+	const PhaseRecord& vista = records[static_cast<int>(Phase::Vista)];
 	FrameSummary spinFrames = spin.frames();
 	FrameSummary flightFrames = flight.frames();
 	FrameSummary editFrames = edits.frames();
@@ -353,6 +377,8 @@ std::vector<std::string> Benchmark::finish() {
 		"SCENE   " + fixed(spinTriangles / 1'000'000.0, 2) + "M TRIANGLES  " + fixed(spinDrawCalls, 0) + " DRAWS",
 		"MEMORY  BLOCKS " + megabytes(finalStats.blockBytes) + " MB  MESHES " + megabytes(finalStats.meshBytes) + " MB  WHOLE GAME "
 			+ megabytes(processBytes) + " MB (PEAK " + megabytes(peakProcessBytes) + " MB)",
+		frameLine("VISTA   ", vista, vista.frames()) + "  " + fixed(vista.average(static_cast<double>(vista.triangles)) / 1'000'000.0, 2)
+			+ "M TRIANGLES  " + fixed(vista.average(static_cast<double>(vista.drawCalls)), 0) + " DRAWS",
 	};
 
 	// ---- files ----
@@ -367,9 +393,9 @@ std::vector<std::string> Benchmark::finish() {
 
 		// Full detail per phase, the screen only has room for the headline numbers
 		report << "\nphase    seconds  frames  avg_fps  1%_low_fps  worst_ms  update_ms  render_ms  gpu_ms  shadow_ms  triangles  draw_cmds\n";
-		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits, &zoom };
-		const char* names[] = { "load", "spin", "flight", "edits", "zoom" };
-		const int phaseCount = 5;
+		const PhaseRecord* phases[] = { &load, &spin, &flight, &edits, &zoom, &vista };
+		const char* names[] = { "load", "spin", "flight", "edits", "zoom", "vista" };
+		const int phaseCount = 6;
 		for (int i = 0; i < phaseCount; i++) {
 			const PhaseRecord& r = *phases[i];
 			FrameSummary f = r.frames();
