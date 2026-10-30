@@ -40,7 +40,7 @@ bool decodeBlocks(const std::vector<uint8_t>& data, size_t expectedBlockCount, s
 	for (size_t i = 1; i < data.size(); i += 3) {
 		uint8_t type = data[i];
 		size_t run = data[i + 1] | (static_cast<size_t>(data[i + 2]) << 8);
-		if (type > static_cast<uint8_t>(BlockType::WATER)) return false;//unknown block type
+		if (type > static_cast<uint8_t>(BlockType::SNOW)) return false;//unknown block type
 		if (outBlocks.size() + run > expectedBlockCount) return false;//too many blocks
 
 		outBlocks.insert(outBlocks.end(), run, static_cast<BlockType>(type));

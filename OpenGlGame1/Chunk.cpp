@@ -13,18 +13,22 @@ Chunk::Chunk(glm::ivec3 position, const TerrainGenerator& terrain) : chunkPositi
 	int lowest = chunkHeight, highest = -1;
 	for (int z = 0; z < chunkSize; z++) {
 		for (int x = 0; x < chunkSize; x++) {
-			int height = static_cast<int>(terrain.getHeight(chunkPosition.x + x, chunkPosition.z + z));
-			heights[z * chunkSize + x] = static_cast<int16_t>(height);
+			float worldX = chunkPosition.x + x, worldZ = chunkPosition.z + z;
+			int height = static_cast<int>(terrain.getHeight(worldX, worldZ));
+			bool snow = terrain.hasSnow(worldX, worldZ, static_cast<float>(height));
+			heights[z * chunkSize + x] = static_cast<int16_t>(snow ? height | snowBit : height);
 			lowest = std::min(lowest, height);
 			highest = std::max(highest, height);
 		}
 	}
 
-	// Sections entirely above the surface are air, entirely below the dirt are stone, the rest are terrain
+	// Sections entirely above the surface are air, or water under the sea, entirely below the dirt are stone,
+	// the rest are terrain. Open ocean is a whole section of water, so like rock it needs no mesh job
 	for (int s = 0; s < sectionCount; s++) {
 		ChunkSection& section = sections[s];
 		int bottom = s * ChunkSection::size, top = bottom + ChunkSection::size - 1;
-		if (bottom > highest) section.fill = BlockType::AIR;
+		if (bottom > highest && bottom >= seaLevel) section.fill = BlockType::AIR;
+		else if (bottom > highest && top < seaLevel) section.fill = BlockType::WATER;
 		else if (top < lowest - 3) section.fill = BlockType::STONE;
 		else section.terrain = true;
 	}

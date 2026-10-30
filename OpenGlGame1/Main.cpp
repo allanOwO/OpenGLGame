@@ -257,9 +257,10 @@ void Main::startWorld(const WorldInfo& info) {
         player->setLook(info.yaw, info.pitch);
     }
     else {
-        // New world: stand on top of the terrain at the origin
+        // New world: stand on top of the terrain at the origin, or on the water if that's under the sea
         // getHeight is in chunk local y, chunks sit baseTerrainHeight below world y = 0
-        int surface = static_cast<int>(world->getTerrain().getHeight(0.0f, 0.0f)) - Chunk::baseTerrainHeight;
+        int ground = static_cast<int>(world->getTerrain().getHeight(0.0f, 0.0f));
+        int surface = std::max(ground, Chunk::seaLevel - 1) - Chunk::baseTerrainHeight;
         player->spawn(glm::vec3(0.5f, surface + 1.0f, 0.5f));
     }
 

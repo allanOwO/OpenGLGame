@@ -148,15 +148,25 @@ public:
 		return meshes.back();
 	}
 
-	// Height of the grass block in each x/z column (chunk local y), index z * chunkSize + x
-	// An unedited column is just this: grass on top, 3 dirt under it, stone the rest of the way down
+	// Chunk local y of the sea surface, water fills everything below it. Chunks sit baseTerrainHeight below
+	// world y = 0, so this is world y = 0
+	static constexpr int seaLevel = baseTerrainHeight;
+
+	// Height of the top ground block in each x/z column (chunk local y), index z * chunkSize + x
+	// An unedited column is just this: grass on top, 3 dirt under it, stone the rest of the way down,
+	// with water above it if it's under the sea, and snow in place of the grass and dirt if it's high up
+	// Heights fit in 8 bits, so snowBit marks a snowy column: where the snow line is depends on the column's
+	// position (TerrainGenerator::hasSnow), and this way everything that passes heights around gets it for free
 	// 512 bytes instead of the ~5 KB of block arrays the surface sections used to take
 	std::array<int16_t, chunkSize * chunkSize> heights{};
-	static BlockType terrainBlock(int height, int y) {
-		if (y > height) return BlockType::AIR;
-		if (y == height) return BlockType::GRASS;
-		if (y >= height - 3) return BlockType::DIRT;
-		return BlockType::STONE;
+	static constexpr int heightMask = 255;
+	static constexpr int snowBit = 256;
+	static BlockType terrainBlock(int column, int y) {//column is an entry of heights
+		int height = column & heightMask;
+		if (y > height) return y < seaLevel ? BlockType::WATER : BlockType::AIR;
+		if (y < height - 3) return BlockType::STONE;
+		if (column & snowBit) return BlockType::SNOW;
+		return y == height ? BlockType::GRASS : BlockType::DIRT;
 	}
 	glm::vec3 chunkPosition;//world position of the column's bottom corner
 	glm::vec3 sectionOrigin(int section) const { return chunkPosition + glm::vec3(0.0f, section * ChunkSection::size, 0.0f); }

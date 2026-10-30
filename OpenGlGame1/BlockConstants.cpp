@@ -13,6 +13,10 @@ int getBlockTile(BlockType blockType, BlockFace face) {
             return 1; // Grass Side
     case BlockType::STONE:
         return 3;
+    case BlockType::WATER:
+        return 4;
+    case BlockType::SNOW:
+        return 5;
     default:
         return 0;
     }

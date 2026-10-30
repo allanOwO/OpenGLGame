@@ -14,10 +14,8 @@ public:
 	explicit TerrainGenerator(int seed);
 
 	float getHeight(float x, float z) const;//height in chunk local y (0 to Chunk::chunkHeight - 1)
+	bool hasSnow(float x, float z, float height) const;//is ground this high at this position above the snow line
 	int getSeed() const { return seed; }
-
-	// Chunk local y of the sea surface. Chunks sit baseTerrainHeight below world y = 0, so this is world y = 0
-	static constexpr float seaLevel = 64.0f;
 
 private:
 	float continentHeight(float continentalness) const;
@@ -31,5 +29,6 @@ private:
 	FastNoiseLite ridgeNoise;
 	FastNoiseLite detailNoise;
 	FastNoiseLite warpNoise;
+	FastNoiseLite snowNoise;
 	int seed;
 };

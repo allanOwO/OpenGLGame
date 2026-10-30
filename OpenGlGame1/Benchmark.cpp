@@ -90,6 +90,7 @@ Benchmark::Benchmark(const World& world, int screenWidth, int screenHeight)
 				highest = std::max(highest, terrain.getHeight(x + dx, dz));
 			}
 		}
+		highest = std::max(highest, static_cast<float>(Chunk::seaLevel - 1));//the camera stays above the water too
 		raw[i] = highest - Chunk::baseTerrainHeight;//chunk local y to world y
 	}
 

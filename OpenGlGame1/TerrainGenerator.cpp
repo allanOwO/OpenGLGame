@@ -1,7 +1,11 @@
 #include "TerrainGenerator.h"
 #include <glm/glm.hpp>
 #include <cmath>
-#include "Chunk.h"//for chunkHeight
+#include "Chunk.h"//for chunkHeight and seaLevel
+
+static const float seaLevel = static_cast<float>(Chunk::seaLevel);
+static const float snowLine = 185.0f;//chunk local y, on average
+static const float snowLineWander = 30.0f;//how far noise can move it up or down
 
 
 // Frequency is 1 / (rough size of a feature in blocks)
@@ -40,6 +44,13 @@ TerrainGenerator::TerrainGenerator(int seed) : seed(seed) {
 	warpNoise.SetSeed(seed + 4);
 	warpNoise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
 	warpNoise.SetFrequency(0.006f);
+
+	// Moves the snow line up and down over a few dozen blocks, so it isn't a level line around every mountain
+	snowNoise.SetSeed(seed + 5);
+	snowNoise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+	snowNoise.SetFrequency(0.02f);
+	snowNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
+	snowNoise.SetFractalOctaves(3);
 }
 
 float TerrainGenerator::getHeight(float x, float z) const {
@@ -50,6 +61,13 @@ float TerrainGenerator::getHeight(float x, float z) const {
 		+ detailHeight(x, z);
 
 	return glm::clamp(height, 0.0f, static_cast<float>(Chunk::chunkHeight - 1));
+}
+
+bool TerrainGenerator::hasSnow(float x, float z, float height) const {
+	// Outside the band the noise can't change the answer, which skips it for nearly every column
+	if (height < snowLine - snowLineWander) return false;
+	if (height >= snowLine + snowLineWander) return true;
+	return height >= snowLine + snowNoise.GetNoise(x, z) * snowLineWander;
 }
 
 // Continentalness (-1 to 1) -> ground height, as a curve through hand picked points

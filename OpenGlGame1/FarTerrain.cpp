@@ -68,6 +68,19 @@ namespace {
 				for (int i = firstI; i < firstI + cellsPerChunk; i++)
 					height[j * n + i] = std::max(height[j * n + i], entry.second);
 		}
+		// The sea is flat: a cell under it is as high as the top water block, so it's that height that makes it water
+		const int waterHeight = Chunk::seaLevel - 1;
+		for (int& h : height) h = std::max(h, waterHeight);
+		// Snow is decided at the middle of the cell, using the same snow line as real chunks
+		std::vector<uint8_t> snow(static_cast<size_t>(n) * n);
+		for (int j = 0; j < n; j++)
+			for (int i = 0; i < n; i++)
+				snow[j * n + i] = terrain.hasSnow(baseX + (i + 0.5f) * cell, baseZ + (j + 0.5f) * cell, static_cast<float>(height[j * n + i]));
+		auto column = [&](int index) { return height[index] | (snow[index] ? Chunk::snowBit : 0); };
+		auto surfaceBlock = [&](int index) {
+			int h = height[index];
+			return h <= waterHeight ? BlockType::WATER : Chunk::terrainBlock(column(index), h);
+		};
 
 		// Cells only line up with chunks at 16 blocks or less, which units next to the near tier always are
 		auto shown = [&](int i, int j) {
@@ -76,13 +89,16 @@ namespace {
 			int chunkX = i * cell / Chunk::chunkSize, chunkZ = j * cell / Chunk::chunkSize;
 			return !excluded[chunkZ * FarUnit::unitChunks + chunkX];
 		};
-		// A wall from floor up to top (exclusive), banded like generated chunks: grass on the top block,
-		// dirt for the 3 under it, stone below. addBand(bottom, height, type) appends one quad
-		auto wallBands = [](int floor, int top, auto addBand) {
+		// A wall from floor up to top (exclusive), banded like generated chunks: the surface block on top,
+		// dirt or snow for the 3 under it, stone below. addBand(bottom, height, type) appends one quad
+		// index is the cell the wall belongs to
+		auto wallBands = [&](int index, int floor, int top, auto addBand) {
+			int h = top - 1;
+			if (h <= waterHeight) { addBand(floor, top - floor, BlockType::WATER); return; }
 			int grassFloor = std::max(floor, top - 1), dirtFloor = std::max(floor, top - 4);
 			if (dirtFloor > floor) addBand(floor, dirtFloor - floor, BlockType::STONE);
-			if (grassFloor > dirtFloor) addBand(dirtFloor, grassFloor - dirtFloor, BlockType::DIRT);
-			addBand(grassFloor, top - grassFloor, BlockType::GRASS);
+			if (grassFloor > dirtFloor) addBand(dirtFloor, grassFloor - dirtFloor, Chunk::terrainBlock(column(index), h - 1));
+			addBand(grassFloor, top - grassFloor, surfaceBlock(index));
 		};
 		// Open edges (the unit's border, and around near chunks) have walls down past the lowest ground
 		int lowest = Chunk::chunkHeight;
@@ -90,16 +106,16 @@ namespace {
 		lowest = std::max(0, lowest - 8);
 
 		MeshData groups[faceGroupCount];
-		// Tops, cells next to each other at the same height joined into one quad
+		// Tops, cells next to each other at the same height and block joined into one quad
 		for (int j = 0; j < n; j++) {
 			for (int i = 0; i < n;) {
 				if (!shown(i, j)) { i++; continue; }
 				int h = height[j * n + i];
 				int width = 1;
-				while (shown(i + width, j) && height[j * n + i + width] == h) width++;
+				while (shown(i + width, j) && column(j * n + i + width) == column(j * n + i)) width++;
 				// Facing +y the quad's sides run along z then x (see Chunk::appendQuad)
 				Chunk::appendQuad(groups, glm::ivec3(i * cell, h + 1, j * cell), glm::ivec3(0, 0, cell), glm::ivec3(width * cell, 0, 0),
-					1, 1, BlockType::GRASS);
+					1, 1, surfaceBlock(j * n + i));
 				i += width;
 			}
 		}
@@ -117,11 +133,11 @@ namespace {
 				};
 				if (left) {
 					int floor = right ? rightTop : lowest;
-					if (leftTop > floor) wallBands(floor, leftTop, addX(1));
+					if (leftTop > floor) wallBands(j * n + edge - 1, floor, leftTop, addX(1));
 				}
 				if (right) {
 					int floor = left ? leftTop : lowest;
-					if (rightTop > floor) wallBands(floor, rightTop, addX(-1));
+					if (rightTop > floor) wallBands(j * n + edge, floor, rightTop, addX(-1));
 				}
 			}
 		}
@@ -138,11 +154,11 @@ namespace {
 				};
 				if (back) {
 					int floor = front ? frontTop : lowest;
-					if (backTop > floor) wallBands(floor, backTop, addZ(1));
+					if (backTop > floor) wallBands((edge - 1) * n + i, floor, backTop, addZ(1));
 				}
 				if (front) {
 					int floor = back ? backTop : lowest;
-					if (frontTop > floor) wallBands(floor, frontTop, addZ(-1));
+					if (frontTop > floor) wallBands(edge * n + i, floor, frontTop, addZ(-1));
 				}
 			}
 		}
