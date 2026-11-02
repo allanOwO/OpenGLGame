@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <memory>
 #include <vector>
 #include <glm/glm.hpp>
 #include <glad/glad.h>
@@ -15,30 +16,33 @@ class TerrainGenerator;//forward declaration, Chunk only needs a reference
 // Those keep no array at all, just `fill`, so a column costs a few KB instead of 64KB
 // The ones the surface passes through are `terrain`: no array either, their blocks are worked out from the
 // column's heights (Chunk::heights). Only a section the player edits gets a real array, 4 KB
-// Meshing per section means a block edit rebuilds 4096 blocks instead of the whole 65536 block column
+// Meshing per section means a block edit rebuilds 4096 blocks instead of the whole 131072 block column
 //
-// Kept small: every loaded column has 16 of these, so each byte here is 64 MB at render distance 1000
+// Kept small: every loaded column has 32 of these, so each byte here is 8 MB at detail distance 250
 // Anything about its mesh is in a SectionMesh instead, which only the few sections with faces have
 struct ChunkSection {
 	static constexpr int size = 16;
 	static constexpr int volume = size * size * size;
 
-	std::vector<BlockType> blocks;//empty when every block is `fill`, or when it's terrain
+	// Null when every block is `fill`, or when it's terrain, otherwise always volume blocks
+	// A pointer instead of a vector because the size never varies: a vector's size and capacity took this from 16 to 32 bytes
+	std::unique_ptr<BlockType[]> blocks;
 	BlockType fill = BlockType::AIR;
 	bool terrain = false;//blocks come from the column's heights, see Chunk::terrainBlock
 	bool rebuildNeeded = true;
 	bool queued = false;//in World's mesh queue, so it's never added twice (a flag here instead of a set of keys:
 	                    //at render distance 400 the set rehashed ~650k entries in one frame)
 
-	bool isUniform() const { return blocks.empty() && !terrain; }
+	bool isUniform() const { return !blocks && !terrain; }
 	bool isEmpty() const { return isUniform() && fill == BlockType::AIR; }
 	static int index(int x, int y, int z) { return (y * size + z) * size + x; }//x innermost, so rows can be memcpy'd
 
 	// Not for terrain sections (they need the column's heights), use Chunk::getBlock / setBlock
 	bool set(int x, int y, int z, BlockType type);//false if the block was already that type
 	void compress();//drops the array if every block turned out the same
-	size_t memoryBytes() const { return blocks.capacity() * sizeof(BlockType); }
+	size_t memoryBytes() const { return blocks ? volume * sizeof(BlockType) : 0; }
 };
+static_assert(sizeof(ChunkSection) <= 16, "ChunkSection grew, every loaded column has sectionCount of these");
 
 // A section's mesh and where it is in its region's merged mesh
 // Most sections are open sky or buried rock with nothing to draw, and those used to carry all this anyway:
@@ -79,9 +83,12 @@ class Chunk
 {
 public:
 	static constexpr int chunkSize = 16;
-	static constexpr int chunkHeight = 256;
+	static constexpr int chunkHeight = 512;
 	static constexpr int baseTerrainHeight = 64;
 	static constexpr int sectionCount = chunkHeight / ChunkSection::size;
+	static_assert(chunkHeight % ChunkSection::size == 0, "a column has to be a whole number of sections");
+	static_assert((chunkHeight & (chunkHeight - 1)) == 0, "heightMask needs a power of 2");
+	static_assert(sectionCount <= 32, "meshedSections and mergedSections have 32 bits, packPlace and the shaders 5 bits of section");
 	bool isActive = true;
 
 	Chunk(glm::ivec3 position, const TerrainGenerator& terrain);//constructor, generates terrain (safe to run on a worker thread)
@@ -155,12 +162,12 @@ public:
 	// Height of the top ground block in each x/z column (chunk local y), index z * chunkSize + x
 	// An unedited column is just this: grass on top, 3 dirt under it, stone the rest of the way down,
 	// with water above it if it's under the sea, and snow in place of the grass and dirt if it's high up
-	// Heights fit in 8 bits, so snowBit marks a snowy column: where the snow line is depends on the column's
+	// Heights fit below chunkHeight, so snowBit marks a snowy column: where the snow line is depends on the column's
 	// position (TerrainGenerator::hasSnow), and this way everything that passes heights around gets it for free
 	// 512 bytes instead of the ~5 KB of block arrays the surface sections used to take
 	std::array<int16_t, chunkSize * chunkSize> heights{};
-	static constexpr int heightMask = 255;
-	static constexpr int snowBit = 256;
+	static constexpr int heightMask = chunkHeight - 1;
+	static constexpr int snowBit = chunkHeight;
 	static BlockType terrainBlock(int column, int y) {//column is an entry of heights
 		int height = column & heightMask;
 		if (y > height) return y < seaLevel ? BlockType::WATER : BlockType::AIR;
@@ -174,11 +181,11 @@ public:
 	// Bit s set = section s has a mesh to draw. Lets the renderer skip empty sections without touching them,
 	// and gives the column's drawn height range for culling. Kept up to date by updateMeshedBit
 	// Also where a SectionMesh that's gone back to unused is dropped, since every mesh change ends here
-	uint16_t meshedSections = 0;
+	uint32_t meshedSections = 0;
 	void updateMeshedBit(int section) {
 		SectionMesh* entry = findMesh(section);
-		if (entry && entry->mesh.vertexCount > 0) meshedSections |= static_cast<uint16_t>(1u << section);
-		else meshedSections &= static_cast<uint16_t>(~(1u << section));
+		if (entry && entry->mesh.vertexCount > 0) meshedSections |= 1u << section;
+		else meshedSections &= ~(1u << section);
 		if (entry && entry->isUnused()) {
 			*entry = meshes.back();//order doesn't matter, so swap with the last instead of shifting
 			meshes.pop_back();
@@ -187,7 +194,7 @@ public:
 
 	// Bit s set = section s is drawn as part of its region's merged mesh instead of on its own (see World::rebuildRegion)
 	// Sections not in it (inside simulation distance, or meshed since the last merge) are drawn on their own
-	uint16_t mergedSections = 0;
+	uint32_t mergedSections = 0;
 	bool mergeWanted = false;//was outside simulation distance when its region was last merged
 
 	bool modified = false;//player changed a block, so it must be kept when unloaded (it can't be regenerated)

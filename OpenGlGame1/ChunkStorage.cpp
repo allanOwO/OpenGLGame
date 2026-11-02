@@ -4,7 +4,10 @@
 #include "FileUtil.h"
 
 // Bump this if the byte layout changes, so old saves can be detected
-static const uint8_t blockFormatVersion = 1;
+static const uint8_t blockFormatVersion = 2;
+
+// Version 1 columns were 16x256x16, still read so old saves keep their edits
+static const size_t version1BlockCount = 16 * 256 * 16;
 
 static const size_t maxRunLength = 0xFFFF;//largest count a uint16 can hold
 
@@ -31,8 +34,10 @@ std::vector<uint8_t> encodeBlocks(const std::vector<BlockType>& blocks) {
 }
 
 bool decodeBlocks(const std::vector<uint8_t>& data, size_t expectedBlockCount, std::vector<BlockType>& outBlocks) {
-	if (data.empty() || data[0] != blockFormatVersion) return false;
+	if (data.empty() || (data[0] != blockFormatVersion && data[0] != 1)) return false;
 	if ((data.size() - 1) % 3 != 0) return false;//every run is 3 bytes
+	const size_t storedBlockCount = data[0] == 1 ? version1BlockCount : expectedBlockCount;
+	if (storedBlockCount > expectedBlockCount) return false;
 
 	outBlocks.clear();
 	outBlocks.reserve(expectedBlockCount);
@@ -41,12 +46,14 @@ bool decodeBlocks(const std::vector<uint8_t>& data, size_t expectedBlockCount, s
 		uint8_t type = data[i];
 		size_t run = data[i + 1] | (static_cast<size_t>(data[i + 2]) << 8);
 		if (type > static_cast<uint8_t>(BlockType::SNOW)) return false;//unknown block type
-		if (outBlocks.size() + run > expectedBlockCount) return false;//too many blocks
+		if (outBlocks.size() + run > storedBlockCount) return false;//too many blocks
 
 		outBlocks.insert(outBlocks.end(), run, static_cast<BlockType>(type));
 	}
 
-	return outBlocks.size() == expectedBlockCount;
+	if (outBlocks.size() != storedBlockCount) return false;
+	outBlocks.resize(expectedBlockCount, BlockType::AIR);//y is slowest, so a shorter old column just gets sky on top
+	return true;
 }
 
 void ChunkStorage::store(uint64_t key, std::vector<uint8_t> data) {

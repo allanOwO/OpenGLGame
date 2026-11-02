@@ -33,7 +33,7 @@ const uint atlasTiles = 4u;
 
 // Offset of the vertex's section from its region's corner, in blocks
 vec3 placeOffset(uint place) {
-    return vec3(float(place & 7u), float((place >> 6) & 15u), float((place >> 3) & 7u)) * 16.0;
+    return vec3(float(place & 7u), float((place >> 6) & 31u), float((place >> 3) & 7u)) * 16.0;
 }
 
 void main()

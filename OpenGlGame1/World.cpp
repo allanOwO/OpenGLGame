@@ -814,7 +814,7 @@ void World::rebuildRegion(ChunkRegion& region) {
     }
     for (Chunk* chunk : region.chunks) {
         for (const SectionMesh& entry : chunk->meshes) {
-            if (entry.mergedCount > 0) chunk->mergedSections |= static_cast<uint16_t>(1u << entry.section);
+            if (entry.mergedCount > 0) chunk->mergedSections |= 1u << entry.section;
         }
         for (int s = 0; s < Chunk::sectionCount; s++) chunk->updateMeshedBit(s);//may drop entries, so its own loop
     }

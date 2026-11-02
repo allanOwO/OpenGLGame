@@ -16,7 +16,7 @@ struct PackedVertex {
 // Every vertex is positioned relative to its 8x8 column region instead of its own section,
 // so the meshes of a whole region can be copied end to end into one mesh and drawn with one origin
 // The position stays section local (small numbers), and the shader adds place * 16 on top:
-// bits 0-2 column x in the region, bits 3-5 column z, bits 6-9 section (height)
+// bits 0-2 column x in the region, bits 3-5 column z, bits 6-10 section (height)
 inline uint16_t packPlace(int columnX, int columnZ, int section) {
     return static_cast<uint16_t>(columnX | (columnZ << 3) | (section << 6));
 }

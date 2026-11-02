@@ -45,7 +45,8 @@ void Chunk::buildSections(const std::vector<BlockType>& flat) {
 	for (int s = 0; s < sectionCount; s++) {
 		ChunkSection& section = sections[s];
 		const BlockType* start = &flat[flatIndex(0, s * ChunkSection::size, 0)];
-		section.blocks.assign(start, start + ChunkSection::volume);
+		section.blocks = std::make_unique<BlockType[]>(ChunkSection::volume);
+		std::copy(start, start + ChunkSection::volume, section.blocks.get());
 		section.compress();
 	}
 }
@@ -61,7 +62,7 @@ std::vector<BlockType> Chunk::flatBlocks() const {
 					out[y * chunkSize * chunkSize + i] = terrainBlock(heights[i], s * ChunkSection::size + y);
 		}
 		else if (section.isUniform()) std::fill(out, out + ChunkSection::volume, section.fill);
-		else std::copy(section.blocks.begin(), section.blocks.end(), out);
+		else std::copy(section.blocks.get(), section.blocks.get() + ChunkSection::volume, out);
 	}
 	return flat;
 }
@@ -69,9 +70,10 @@ std::vector<BlockType> Chunk::flatBlocks() const {
 // ---------- sections ----------
 
 bool ChunkSection::set(int x, int y, int z, BlockType type) {
-	if (blocks.empty()) {
+	if (!blocks) {
 		if (fill == type) return false;
-		blocks.assign(volume, fill);//first different block, now it needs the full array
+		blocks = std::make_unique<BlockType[]>(volume);//first different block, now it needs the full array
+		std::fill(blocks.get(), blocks.get() + volume, fill);
 	}
 	BlockType& block = blocks[index(x, y, z)];
 	if (block == type) return false;
@@ -80,14 +82,13 @@ bool ChunkSection::set(int x, int y, int z, BlockType type) {
 }
 
 void ChunkSection::compress() {
-	if (blocks.empty()) return;
+	if (!blocks) return;
 	BlockType first = blocks[0];
-	for (BlockType b : blocks) {
-		if (b != first) return;//mixed, keep the array
+	for (int i = 0; i < volume; i++) {
+		if (blocks[i] != first) return;//mixed, keep the array
 	}
 	fill = first;
-	blocks.clear();
-	blocks.shrink_to_fit();//clear alone keeps the memory
+	blocks.reset();
 }
 
 // ---------- meshing input ----------
@@ -114,7 +115,7 @@ bool Chunk::makeTerrainSource(int sectionIndex, const Chunk* const neighbours[8]
 				int s = sectionIndex - 1 + r;
 				if (s < 0 || s >= sectionCount) continue;//below/above the world, expand handles those
 				const ChunkSection& section = column->sections[s];
-				if (!section.blocks.empty()) return false;//edited, needs the real blocks
+				if (section.blocks) return false;//edited, needs the real blocks
 				source.terrain[c][r] = section.terrain;
 				source.fill[c][r] = section.fill;
 				anyTerrain |= section.terrain;
@@ -554,7 +555,7 @@ bool Chunk::setBlock(int x, int y, int z, BlockType type) {
 		// First edit in it: it can't be worked out from the heights any more, so it gets a real array
 		if (getBlock(x, y, z) == type) return false;
 		int bottom = (y / ChunkSection::size) * ChunkSection::size;
-		section.blocks.resize(ChunkSection::volume);
+		section.blocks = std::make_unique<BlockType[]>(ChunkSection::volume);
 		for (int ly = 0; ly < ChunkSection::size; ly++)
 			for (int i = 0; i < chunkSize * chunkSize; i++)
 				section.blocks[ly * chunkSize * chunkSize + i] = terrainBlock(heights[i], bottom + ly);
@@ -569,6 +570,6 @@ bool Chunk::setBlock(int x, int y, int z, BlockType type) {
 BlockType Chunk::getBlock(int x, int y, int z) const {
 	const ChunkSection& section = sections[y / ChunkSection::size];
 	if (section.terrain) return terrainBlock(heights[z * chunkSize + x], y);
-	if (section.blocks.empty()) return section.fill;
+	if (!section.blocks) return section.fill;
 	return section.blocks[ChunkSection::index(x, y % ChunkSection::size, z)];
 }

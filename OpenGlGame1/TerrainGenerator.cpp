@@ -112,7 +112,7 @@ float TerrainGenerator::mountainHeight(float x, float z, float continentalness) 
 	ridges = std::pow(ridges, 1.5f);//sharper peaks, wider valleys
 
 	// The mask scales both a raised base and the ridges, so ranges rise out of foothills instead of popping up
-	// Top of the tallest peak: sea level + 24 (land) + 25 + 140 + detail, just under the chunk height of 256
+	// Top of the tallest peak: sea level + 24 (land) + 25 + 140 + detail, about 261, half the chunk height of 512
 	float uplift = 25.0f;
 	float peakHeight = 140.0f;
 	return mask * (uplift + ridges * peakHeight);
