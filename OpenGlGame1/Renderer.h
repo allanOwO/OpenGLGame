@@ -59,6 +59,7 @@ private:
 
 	// uniform locations, looked up once
 	GLint viewLocation, projectionLocation, textureLocation, sunDirLoc, camPosLoc;
+	GLint fogColourLoc, fogStartLoc, fogEndLoc;
 	GLint shadowMapLoc, mainLightSpaceLoc;
 	GLint sunViewLoc, sunProjLoc, sunColourLoc, sunSunDirLoc, sunCamPosLoc;
 	GLint lightSpaceLoc;
@@ -109,4 +110,7 @@ private:
 	GLuint depthMapFBO = 0;
 	GLuint depthMap = 0;
 	glm::mat4 lightSpaceMatrix = glm::mat4(1.0f);
+
+	static constexpr float FOG_STRENGTH = 0.1f;//percentage of the far distance where fog starts, 0.1 means 10% of the far distance is clear, then it fades to full fog at the far distance
+	glm::vec3 fogColour = glm::vec3(0.1f, 0.4f, 0.6f);//the colour of the fog, also used as the clear colour
 };

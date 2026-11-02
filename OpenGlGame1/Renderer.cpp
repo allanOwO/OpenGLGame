@@ -50,6 +50,9 @@ void Renderer::createShaders() {
     camPosLoc = glGetUniformLocation(shader->ID, "cameraPos");
     shadowMapLoc = glGetUniformLocation(shader->ID, "shadowMap");
     mainLightSpaceLoc = glGetUniformLocation(shader->ID, "lightSpaceMatrix");
+	fogColourLoc = glGetUniformLocation(shader->ID, "fogColour");
+	fogStartLoc = glGetUniformLocation(shader->ID, "fogStart");
+	fogEndLoc = glGetUniformLocation(shader->ID, "fogEnd");
 
     // Samplers never change unit, set once: atlas on 0, shadow map on 1
     glUniform1i(textureLocation, 0);
@@ -250,7 +253,7 @@ void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm:
     // Back to the default framebuffer for the main pass
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, width, height);
-    glClearColor(0.1f, 0.4f, 0.6f, 1.0f);
+    glClearColor(fogColour.r, fogColour.g, fogColour.b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     //use normal shader for chunks
@@ -262,6 +265,15 @@ void Renderer::render(const World& world, const glm::vec3& cameraPos, const glm:
     glUniform3fv(camPosLoc, 1, glm::value_ptr(cameraPos));
     glUniform3fv(sunDirLoc, 1, glm::value_ptr(sunDirection));
     glUniformMatrix4fv(mainLightSpaceLoc, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+
+
+    //fog stuff
+	float fogEnd = static_cast<float>((world.getFarDistance()-1) * Chunk::chunkSize); 
+	float fogStart = fogEnd * (1.0f - FOG_STRENGTH);
+
+    glUniform3fv(fogColourLoc, 1, glm::value_ptr(fogColour));
+    glUniform1f(fogStartLoc, fogStart);
+    glUniform1f(fogEndLoc, fogEnd);
 
     // Bind shadow map to texture unit 1 (unit 0 is for texture atlas, bound in drawChunks)
     glActiveTexture(GL_TEXTURE1);

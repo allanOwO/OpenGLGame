@@ -15,6 +15,10 @@ uniform sampler2D ourTexture;
 uniform sampler2D shadowMap;
 uniform vec3 cameraPos;
 
+uniform vec3 fogColour;
+uniform float fogStart;
+uniform float fogEnd;
+
 const float tileSize = 1.0 / 4.0;//one tile of the 4x4 atlas
 
 vec3 sunsetColour();
@@ -65,6 +69,10 @@ void main()
 
     // Combine lighting with ambient occlusion and texture
     vec3 result = lighting * AO * texColour.rgb;
+
+    float dist = length(cameraPos - FragPos);
+    float fog = smoothstep(fogStart, fogEnd, dist);
+    result = mix(result, fogColour, fog);
 
     FragColor = vec4(result, texColour.a);
     //FragColor = texture(ourTexture, TexCoord);//no lighting
